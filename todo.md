@@ -1,0 +1,31 @@
+# 银保报表系统迁移 TODO
+
+- [x] 安装额外依赖（exceljs, multer, xlsx等）
+- [x] 迁移shared/types.ts共享类型
+- [x] 迁移server/report/目录（数据处理核心逻辑）
+- [x] 迁移server/reportApi.ts（Express API路由）
+- [x] 迁移server/settingsApi.ts（系统设置API）
+- [x] 迁移server/syncSettings.ts（设置同步）
+- [x] 注册Express路由到主服务器
+- [x] 迁移client/src/contexts/ReportContext.tsx
+- [x] 迁移client/src/pages/所有页面组件
+- [x] 迁移client/src/pages/channel/所有子页面
+- [x] 迁移client/src/pages/dept/所有子页面
+- [x] 迁移client/src/pages/settings/所有子页面
+- [x] 迁移client/src/components/ReportLayout.tsx
+- [x] 迁移client/src/App.tsx路由配置
+- [x] 迁移client/src/index.css样式系统
+- [x] 迁移hooks（useComposition, usePersistFn, useSettings）
+- [x] 使用S3存储上传的Excel文件和缓存数据
+- [x] 测试数据上传功能
+- [x] 测试报表生成功能
+- [x] 测试目标管理功能
+- [x] 测试所有页面渲染
+- [x] 保存检查点并交付
+- [x] 修复产品简称无法清空的问题
+- [x] 修复银行渠道无法清空的问题
+- [x] 完成ReportProvider集成到main.tsx
+- [x] 修复上传Excel后显示0条数据的问题（自动检测sheet名和表头行）
+- [x] 修复上传文件名中文乱码的问题（multer latin1转utf8）
+- [x] 修复文件上传失败的问题（文件名乱码修复 + 数据条数恢复逻辑修复 + S3缓存破坏）
+- [ ] 修复上传Excel表格数据显示不全的问题
