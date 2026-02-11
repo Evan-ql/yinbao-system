@@ -378,6 +378,16 @@ export function generateDataSource(
 
   console.log(`[DataSource] 总保单数: ${allRows.length}条`);
 
+  // 过滤掉终止、撤单、退保状态的保单
+  const EXCLUDED_STATUS = ['终止', '撤单', '退保'];
+  const beforeFilter = allRows.length;
+  const validRows = allRows.filter(row => {
+    const status = safeStr(row['保单状态']);
+    return !EXCLUDED_STATUS.some(s => status.includes(s));
+  });
+  const excludedCount = beforeFilter - validRows.length;
+  console.log(`[DataSource] 排除终止/撤单/退保保单: ${excludedCount}条, 剩余有效保单: ${validRows.length}条`);
+
   // Debug: check key fields
   let nullMonthCount = 0;
   let nullMgrCount = 0;
@@ -387,7 +397,7 @@ export function generateDataSource(
     console.log(`[DataSource DEBUG] Sample row keys: ${Object.keys(sampleRow).filter(k => k.includes('营业部') || k.includes('缴费') || k.includes('交费') || k === '月' || k === '新约保费').join(', ')}`);
     console.log(`[DataSource DEBUG] Sample: 营业部经理名称=${sampleRow['营业部经理名称']}, 缴费间隔=${sampleRow['缴费间隔']}, 月=${sampleRow['月']}, 新约保费=${sampleRow['新约保费']}`);
   }
-  for (const row of allRows) {
+  for (const row of validRows) {
     if (row['月'] === null || row['月'] === undefined) nullMonthCount++;
     if (!row['营业部经理名称']) nullMgrCount++;
     if (!row['缴费间隔']) nullIntervalCount++;
@@ -395,7 +405,7 @@ export function generateDataSource(
   console.log(`[DataSource DEBUG] null月: ${nullMonthCount}, null营业部经理: ${nullMgrCount}, null缴费间隔: ${nullIntervalCount}`);
 
   // 按月份范围过滤
-  const filtered = allRows.filter(row => {
+  const filtered = validRows.filter(row => {
     const m = row['月'];
     if (m === null || m === undefined) return false;
     return m >= monthStart && m <= monthEnd;
