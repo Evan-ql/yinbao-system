@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Plus, Pencil, Trash2, Check, X, ChevronUp, ChevronDown } from "lucide-react";
+import React, { useState, useMemo } from "react";
+import { Plus, Pencil, Trash2, Check, X, ChevronUp, ChevronDown, ChevronsUpDown, AlertTriangle } from "lucide-react";
 
 export interface ColumnDef {
   key: string;
@@ -8,6 +8,12 @@ export interface ColumnDef {
   options?: { value: string; label: string }[];
   width?: string;
   required?: boolean;
+  sortable?: boolean;
+}
+
+export interface RowHighlight {
+  highlighted: boolean;
+  reason?: string;
 }
 
 interface SettingsTableProps {
@@ -20,7 +26,15 @@ interface SettingsTableProps {
   onDelete: (id: string) => Promise<void>;
   loading?: boolean;
   extraActions?: (item: any) => React.ReactNode;
+  /** 行高亮回调：返回该行是否需要高亮及原因 */
+  rowHighlight?: (item: any) => RowHighlight;
+  /** 表格级别的警告信息 */
+  alertMessage?: string;
+  /** 警告数量 */
+  alertCount?: number;
 }
+
+type SortDirection = "asc" | "desc" | null;
 
 export default function SettingsTable({
   title,
@@ -32,12 +46,63 @@ export default function SettingsTable({
   onDelete,
   loading,
   extraActions,
+  rowHighlight,
+  alertMessage,
+  alertCount,
 }: SettingsTableProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<any>({});
   const [isAdding, setIsAdding] = useState(false);
   const [newData, setNewData] = useState<any>({});
   const [saving, setSaving] = useState(false);
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<SortDirection>(null);
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      if (sortDir === "asc") {
+        setSortDir("desc");
+      } else if (sortDir === "desc") {
+        setSortKey(null);
+        setSortDir(null);
+      }
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  const sortedData = useMemo(() => {
+    if (!sortKey || !sortDir) return data;
+    const col = columns.find((c) => c.key === sortKey);
+    if (!col) return data;
+
+    return [...data].sort((a, b) => {
+      let aVal = a[sortKey];
+      let bVal = b[sortKey];
+
+      if (col.type === "select" && col.options) {
+        const aOpt = col.options.find((o) => o.value === aVal);
+        const bOpt = col.options.find((o) => o.value === bVal);
+        aVal = aOpt?.label || aVal || "";
+        bVal = bOpt?.label || bVal || "";
+      }
+
+      if (!aVal && aVal !== 0) return 1;
+      if (!bVal && bVal !== 0) return -1;
+
+      const aStr = String(aVal);
+      const bStr = String(bVal);
+      const cmp = aStr.localeCompare(bStr, "zh-CN");
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [data, sortKey, sortDir, columns]);
+
+  // 统计高亮行数
+  const highlightedCount = useMemo(() => {
+    if (!rowHighlight) return 0;
+    return data.filter(item => rowHighlight(item).highlighted).length;
+  }, [data, rowHighlight]);
 
   const startEdit = (item: any) => {
     setEditingId(item.id);
@@ -90,7 +155,7 @@ export default function SettingsTable({
     await onDelete(id);
   };
 
-  const renderCell = (col: ColumnDef, value: any) => {
+  const renderCell = (col: ColumnDef, value: any, isHighlighted: boolean) => {
     if (col.type === "select" && col.options) {
       const opt = col.options.find((o) => o.value === value);
       return opt?.label || value || "-";
@@ -130,15 +195,37 @@ export default function SettingsTable({
     );
   };
 
+  const renderSortIcon = (key: string) => {
+    if (sortKey !== key || !sortDir) {
+      return <ChevronsUpDown className="w-3 h-3 opacity-40" />;
+    }
+    if (sortDir === "asc") {
+      return <ChevronUp className="w-3 h-3 text-primary" />;
+    }
+    return <ChevronDown className="w-3 h-3 text-primary" />;
+  };
+
   return (
-    <div className="bg-card border border-border/60 rounded-lg">
+    <div className={`bg-card border rounded-lg ${
+      (alertCount || highlightedCount) > 0 ? "border-orange-300" : "border-border/60"
+    }`}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
-        <div>
-          <h3 className="text-sm font-semibold">{title}</h3>
-          {description && (
-            <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
-          )}
+        <div className="flex items-center gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">{title}</h3>
+              {(alertCount || highlightedCount) > 0 && (
+                <span className="flex items-center gap-1 px-2 py-0.5 bg-orange-100 text-orange-700 text-[10px] font-medium rounded-full">
+                  <AlertTriangle className="w-3 h-3" />
+                  {alertCount || highlightedCount} 项需关注
+                </span>
+              )}
+            </div>
+            {description && (
+              <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+            )}
+          </div>
         </div>
         <button
           onClick={startAdd}
@@ -150,6 +237,14 @@ export default function SettingsTable({
         </button>
       </div>
 
+      {/* Alert banner */}
+      {alertMessage && (
+        <div className="px-4 py-2 bg-orange-50 border-b border-orange-200 flex items-center gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+          <span className="text-xs text-orange-700">{alertMessage}</span>
+        </div>
+      )}
+
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -158,10 +253,16 @@ export default function SettingsTable({
               {columns.map((col) => (
                 <th
                   key={col.key}
-                  className="px-3 py-2 text-left text-xs font-medium text-muted-foreground"
+                  className={`px-3 py-2 text-left text-xs font-medium text-muted-foreground ${
+                    col.sortable ? "cursor-pointer select-none hover:text-foreground hover:bg-muted/50 transition-colors" : ""
+                  }`}
                   style={{ width: col.width }}
+                  onClick={col.sortable ? () => handleSort(col.key) : undefined}
                 >
-                  {col.label}
+                  <span className="inline-flex items-center gap-1">
+                    {col.label}
+                    {col.sortable && renderSortIcon(col.key)}
+                  </span>
                 </th>
               ))}
               <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground w-24">
@@ -207,66 +308,83 @@ export default function SettingsTable({
                   加载中...
                 </td>
               </tr>
-            ) : data.length === 0 && !isAdding ? (
+            ) : sortedData.length === 0 && !isAdding ? (
               <tr>
                 <td colSpan={columns.length + 1} className="px-3 py-8 text-center text-muted-foreground">
                   暂无数据，点击"新增"添加
                 </td>
               </tr>
             ) : (
-              data.map((item) => (
-                <tr
-                  key={item.id}
-                  className="border-b border-border/30 hover:bg-muted/20 transition-colors"
-                >
-                  {columns.map((col) => (
-                    <td key={col.key} className="px-3 py-2">
+              sortedData.map((item) => {
+                const highlight = rowHighlight ? rowHighlight(item) : { highlighted: false };
+                const isHighlighted = highlight.highlighted;
+
+                return (
+                  <tr
+                    key={item.id}
+                    className={`border-b transition-colors ${
+                      isHighlighted
+                        ? "bg-orange-50 border-orange-200 hover:bg-orange-100"
+                        : "border-border/30 hover:bg-muted/20"
+                    }`}
+                    title={isHighlighted ? highlight.reason : undefined}
+                  >
+                    {columns.map((col) => (
+                      <td key={col.key} className="px-3 py-2">
+                        {editingId === item.id ? (
+                          renderInput(col, editData[col.key], (v) =>
+                            setEditData((prev: any) => ({ ...prev, [col.key]: v }))
+                          )
+                        ) : (
+                          <span className={`text-sm ${
+                            isHighlighted ? "font-bold text-orange-700" : ""
+                          }`}>
+                            {renderCell(col, item[col.key], isHighlighted)}
+                          </span>
+                        )}
+                      </td>
+                    ))}
+                    <td className="px-3 py-2 text-center">
                       {editingId === item.id ? (
-                        renderInput(col, editData[col.key], (v) =>
-                          setEditData((prev: any) => ({ ...prev, [col.key]: v }))
-                        )
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={saveEdit}
+                            disabled={saving}
+                            className="p-1 text-green-600 hover:bg-green-50 rounded"
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={cancelEdit}
+                            className="p-1 text-red-500 hover:bg-red-50 rounded"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
                       ) : (
-                        <span className="text-sm">{renderCell(col, item[col.key])}</span>
+                        <div className="flex items-center justify-center gap-1">
+                          {isHighlighted && (
+                            <AlertTriangle className="w-3.5 h-3.5 text-orange-500 mr-0.5" />
+                          )}
+                          <button
+                            onClick={() => startEdit(item)}
+                            className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(item.id)}
+                            className="p-1 text-red-500 hover:bg-red-50 rounded"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                          {extraActions && extraActions(item)}
+                        </div>
                       )}
                     </td>
-                  ))}
-                  <td className="px-3 py-2 text-center">
-                    {editingId === item.id ? (
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          onClick={saveEdit}
-                          disabled={saving}
-                          className="p-1 text-green-600 hover:bg-green-50 rounded"
-                        >
-                          <Check className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={cancelEdit}
-                          className="p-1 text-red-500 hover:bg-red-50 rounded"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          onClick={() => startEdit(item)}
-                          className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(item.id)}
-                          className="p-1 text-red-500 hover:bg-red-50 rounded"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                        {extraActions && extraActions(item)}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -274,8 +392,13 @@ export default function SettingsTable({
 
       {/* Footer */}
       {data.length > 0 && (
-        <div className="px-4 py-2 border-t border-border/40 text-xs text-muted-foreground">
-          共 {data.length} 条记录
+        <div className="px-4 py-2 border-t border-border/40 text-xs text-muted-foreground flex items-center justify-between">
+          <span>共 {data.length} 条记录</span>
+          {highlightedCount > 0 && (
+            <span className="text-orange-600 font-medium">
+              {highlightedCount} 条数据需要补全
+            </span>
+          )}
         </div>
       )}
     </div>

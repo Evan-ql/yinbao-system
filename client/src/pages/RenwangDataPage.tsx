@@ -1,9 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Upload, CheckCircle2, Loader2, FileSpreadsheet } from "lucide-react";
+import { Upload, CheckCircle2, Loader2, FileSpreadsheet, AlertTriangle } from "lucide-react";
 import { useReport } from "@/contexts/ReportContext";
 import DataTableEditor from "@/components/DataTableEditor";
+import StaffDiffPanel, { type DiffResult } from "@/components/StaffDiffPanel";
 
 type SheetTab = "agency" | "network";
 
@@ -11,11 +12,30 @@ export default function RenwangDataPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [activeTab, setActiveTab] = useState<SheetTab>("network");
+  const [staffDiff, setStaffDiff] = useState<DiffResult | null>(null);
+  const [showStaffDiff, setShowStaffDiff] = useState(false);
   const { renwangRaw, setRenwangRaw, setReportData } = useReport();
+
+  // 页面加载时自动检查未确认的人事差异
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/report/staff-diff');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.hasChanges && data.items?.length > 0) {
+            setStaffDiff(data);
+          }
+        }
+      } catch (_) {}
+    })();
+  }, []);
 
   const handleUpload = useCallback(async (f: File) => {
     setFile(f);
     setUploading(true);
+    setStaffDiff(null);
+    setShowStaffDiff(false);
     try {
       const formData = new FormData();
       formData.append("file", f);
@@ -39,11 +59,22 @@ export default function RenwangDataPage() {
         fileName: f.name,
       });
 
+      // 处理人事对比结果
+      if (data.staffDiff && data.staffDiff.hasChanges) {
+        setStaffDiff(data.staffDiff);
+        setShowStaffDiff(true);
+        toast.warning(`检测到 ${data.staffDiff.totalItems} 项人事结构差异，请确认`, { duration: 5000 });
+      }
+
       if (data.report) {
         setReportData(data.report);
-        toast.success("人网数据导入成功，报表已自动生成");
+        if (!data.staffDiff?.hasChanges) {
+          toast.success("人网数据导入成功，报表已自动生成");
+        }
       } else {
-        toast.success("人网数据导入成功");
+        if (!data.staffDiff?.hasChanges) {
+          toast.success("人网数据导入成功");
+        }
       }
     } catch (err: any) {
       toast.error(err.message || "文件解析失败");
@@ -51,6 +82,14 @@ export default function RenwangDataPage() {
       setUploading(false);
     }
   }, [setRenwangRaw, setReportData]);
+
+  const handleStaffDiffConfirmed = useCallback((report: any) => {
+    setShowStaffDiff(false);
+    setStaffDiff(null);
+    if (report) {
+      setReportData(report);
+    }
+  }, [setReportData]);
 
   const handleAgencyChange = useCallback((newData: any[]) => {
     if (!renwangRaw) return;
@@ -119,6 +158,29 @@ export default function RenwangDataPage() {
           </label>
         </CardContent>
       </Card>
+
+      {/* 人事差异提示条 */}
+      {staffDiff && !showStaffDiff && (
+        <button
+          onClick={() => setShowStaffDiff(true)}
+          className="w-full text-left px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition-colors bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
+        >
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>
+            检测到 <strong>{staffDiff.totalItems}</strong> 项人事结构差异（冲突 {staffDiff.conflictCount}，缺失 {staffDiff.missingCount}，新增 {staffDiff.newCount}）
+          </span>
+          <span className="ml-auto text-xs underline">查看并确认</span>
+        </button>
+      )}
+
+      {/* 人事对比确认面板 */}
+      {showStaffDiff && staffDiff && (
+        <StaffDiffPanel
+          diffResult={staffDiff}
+          onClose={() => setShowStaffDiff(false)}
+          onConfirmed={handleStaffDiffConfirmed}
+        />
+      )}
 
       {/* Sheet Tab Switcher */}
       {renwangRaw && (

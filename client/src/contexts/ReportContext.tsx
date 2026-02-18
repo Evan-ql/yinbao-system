@@ -1,5 +1,22 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
 
+export interface IntegrityAlert {
+  hasMissing: boolean;
+  totalMissing: number;
+  missingManagerCount: number;
+  missingDirectorCount: number;
+  missingBothCount: number;
+  missingByPerson: {
+    name: string;
+    role: 'customerManager' | 'deptManager';
+    missingField: string;
+    count: number;
+    totalPremium: number;
+    months: number[];
+  }[];
+  details: any[];
+}
+
 export interface ReportData {
   summary: {
     dataSourceCount: number;
@@ -18,6 +35,7 @@ export interface ReportData {
   channel: any;
   tracking: any;
   coreNetwork: any;
+  integrityAlert?: IntegrityAlert;
 }
 
 export interface SourceRawData {
@@ -43,6 +61,7 @@ export interface DailyRawData {
 interface ReportContextType {
   reportData: ReportData | null;
   setReportData: (data: ReportData | null) => void;
+  integrityAlert: IntegrityAlert | null;
   sourceRaw: SourceRawData | null;
   setSourceRaw: (data: SourceRawData | null) => void;
   renwangRaw: RenwangRawData | null;
@@ -186,9 +205,13 @@ export function ReportProvider({ children }: { children: ReactNode }) {
   const rawData = sourceRaw || renwangRaw || dailyRaw ? { source: sourceRaw?.rows, renwang: renwangRaw?.network, daily: dailyRaw?.rows } : null;
   const setRawData = useCallback((_data: any) => {}, []);
 
+  // 从 reportData 中提取 integrityAlert
+  const integrityAlert = reportData?.integrityAlert || null;
+
   return (
     <ReportContext.Provider value={{
       reportData, setReportData: setReportDataWithSync,
+      integrityAlert,
       sourceRaw, setSourceRaw,
       renwangRaw, setRenwangRaw,
       dailyRaw, setDailyRaw,

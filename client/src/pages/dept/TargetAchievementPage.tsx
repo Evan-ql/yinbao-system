@@ -136,34 +136,7 @@ export default function TargetAchievementPage() {
     const staffIdMap: Record<string, string> = {};
     staffList.forEach((s: any) => { staffIdMap[s.id] = s.name; });
 
-    // 构建人员归属关系映射，用于补全数据源中缺失的字段
-    // 客户经理 -> 营业部经理
-    const cmToManager: Record<string, string> = {};
-    for (const cm of staffCMs) {
-      cmToManager[cm.name] = cm.parentId ? (staffIdMap[cm.parentId] || cm.parentId) : "";
-    }
-    // 营业部经理 -> 总监
-    const managerToDirector: Record<string, string> = {};
-    for (const mgr of staffManagers) {
-      managerToDirector[mgr.name] = mgr.parentId ? (staffIdMap[mgr.parentId] || mgr.parentId) : "";
-    }
-
-    // 补全数据源中缺失的人员归属字段
-    for (const row of filteredDs) {
-      const cm = (row["业绩归属客户经理姓名"] || "").trim();
-      const mgr = (row["营业部经理名称"] || "").trim();
-      const director = (row["营业区总监"] || "").trim();
-
-      // 如果缺少营业部经理名称，尝试通过客户经理查找
-      if (!mgr && cm && cmToManager[cm]) {
-        row["营业部经理名称"] = cmToManager[cm];
-      }
-      // 如果缺少营业区总监，尝试通过营业部经理查找
-      const finalMgr = (row["营业部经理名称"] || "").trim();
-      if (!director && finalMgr && managerToDirector[finalMgr]) {
-        row["营业区总监"] = managerToDirector[finalMgr];
-      }
-    }
+    // [v1.0.3] 不再自动补全人员归属，改为人工维护
 
     // 聚合函数
     const aggregate = (

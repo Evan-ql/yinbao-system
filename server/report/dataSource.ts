@@ -33,9 +33,9 @@ const SRC_NAME_MAP: Record<string, string> = {
   '个人增加保额缴费': '个人增加保额交费',
 };
 
-// 预览用的关键列
+// 预览用的关键列（不再限制，改为显示全部列）
 const PREVIEW_COLS = [
-  '保单号', '投保人姓名', '险种', '缴费间隔', '缴费期间年', '新约保费',
+  '保单号', '险种', '缴费间隔', '缴费期间年', '新约保费',
   '保单签单日期', '银行总行', '十大银行渠道', '代理机构名称',
   '业绩归属网点名称', '业绩归属客户经理姓名', '营业部经理名称',
   '保单状态', '销售方式',
@@ -127,8 +127,8 @@ export function validateSourceColumns(sourceBuffer: Buffer): ColumnValidation {
     expectedHeaders.add(mapped);
     expectedToOriginal.set(mapped, h);
   }
-  // 额外的列：价值规模分类、是否行方预录、是否蓄客、是否潜客、投保人姓名
-  for (const extra of ['价值规模分类', '是否行方预录', '是否蓄客', '是否潜客', '投保人姓名']) {
+  // 额外的列：价值规模分类、是否行方预录、是否蓄客、是否潜客
+  for (const extra of ['价值规模分类', '是否行方预录', '是否蓄客', '是否潜客']) {
     expectedHeaders.add(extra);
     expectedToOriginal.set(extra, extra);
   }
@@ -190,6 +190,14 @@ export function parseSourceFile(sourceBuffer: Buffer): DataRow[] {
   // Re-read with raw values for numeric data
   const rawDataRaw = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1 });
 
+  // 获取全部列名（按原始顺序）
+  const allHeaderNames: string[] = [];
+  for (let c = 0; c < headerRow.length; c++) {
+    if (headerRow[c]) {
+      allHeaderNames.push(safeStr(headerRow[c]));
+    }
+  }
+
   const allRows: DataRow[] = [];
   const dataStartRow = headerRowIdx + 1;
 
@@ -197,35 +205,13 @@ export function parseSourceFile(sourceBuffer: Buffer): DataRow[] {
     const srcRow = rawDataRaw[r];
     if (!srcRow || !srcRow[0]) continue;
 
-    const getVal = (headerName: string): any => {
-      // Try original name first, then mapped name
-      const col = srcHeaders[headerName];
-      if (col !== undefined) return srcRow[col];
-      const mapped = SRC_NAME_MAP[headerName];
-      if (mapped) {
-        const mappedCol = srcHeaders[mapped];
-        if (mappedCol !== undefined) return srcRow[mappedCol];
-      }
-      return undefined;
-    };
-
     const out: DataRow = {};
-    // Extract preview columns
-    for (const h of PREVIEW_COLS) {
-      // Try original name first, then mapped name
-      let col = srcHeaders[h];
-      if (col === undefined) {
-        const mapped = SRC_NAME_MAP[h];
-        if (mapped) col = srcHeaders[mapped];
-      }
+    // 提取全部列的数据
+    for (const headerName of allHeaderNames) {
+      const col = srcHeaders[headerName];
       if (col !== undefined) {
-        out[h] = srcRow[col];
+        out[headerName] = srcRow[col];
       }
-    }
-    // Also get 投保人姓名 from original header
-    const toubaoren = srcHeaders['投保人姓名'];
-    if (toubaoren !== undefined) {
-      out['投保人姓名'] = srcRow[toubaoren];
     }
 
     allRows.push(out);

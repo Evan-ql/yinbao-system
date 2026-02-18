@@ -1,6 +1,7 @@
-import { ReactNode, useState, useCallback } from "react";
+import { ReactNode, useState, useCallback, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
 import {
+  AlertTriangle,
   BarChart3,
   Building2,
   ChevronDown,
@@ -16,8 +17,11 @@ import {
   Clock,
   CalendarDays,
   Settings,
+  X,
+  ArrowRight,
 } from "lucide-react";
 import { useReport } from "@/contexts/ReportContext";
+import { APP_VERSION } from "@shared/const";
 
 interface SubItem {
   icon: any;
@@ -59,8 +63,22 @@ export default function ReportLayout({ children }: { children: ReactNode }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
     "/import": true,
   });
-  const { reportData } = useReport();
+  const { reportData, integrityAlert } = useReport();
+  const hasIntegrityIssue = integrityAlert?.hasMissing ?? false;
   const [exporting, setExporting] = useState(false);
+  const [showAlertDetail, setShowAlertDetail] = useState(false);
+  const alertRef = useRef<HTMLDivElement>(null);
+
+  // 点击外部关闭弹出详情
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (alertRef.current && !alertRef.current.contains(e.target as Node)) {
+        setShowAlertDetail(false);
+      }
+    }
+    if (showAlertDetail) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showAlertDetail]);
 
   const handleExport = useCallback(async () => {
     if (exporting) return;
@@ -123,6 +141,10 @@ export default function ReportLayout({ children }: { children: ReactNode }) {
             const isDisabled = item.requiresData && !reportData;
             const isExpanded = expandedGroups[item.path] ?? false;
 
+            // 判断是否需要在此菜单项上显示报警
+            const showMenuAlert =
+              hasIntegrityIssue && (item.path === "/settings" || item.path === "/import");
+
             if (hasChildren) {
               return (
                 <div key={item.path}>
@@ -138,7 +160,7 @@ export default function ReportLayout({ children }: { children: ReactNode }) {
                       }
                     }}
                     disabled={isDisabled}
-                    className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
+                    className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors relative ${
                       isActive
                         ? "text-sidebar-foreground font-medium"
                         : isDisabled
@@ -151,12 +173,18 @@ export default function ReportLayout({ children }: { children: ReactNode }) {
                     {!collapsed && (
                       <>
                         <span className="truncate flex-1 text-left">{item.label}</span>
+                        {showMenuAlert && (
+                          <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse shrink-0" />
+                        )}
                         <ChevronDown
                           className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${
                             isExpanded ? "" : "-rotate-90"
                           }`}
                         />
                       </>
+                    )}
+                    {collapsed && showMenuAlert && (
+                      <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
                     )}
                   </button>
                   {!collapsed && isExpanded && (
@@ -191,7 +219,7 @@ export default function ReportLayout({ children }: { children: ReactNode }) {
                   if (!isDisabled) setLocation(item.path);
                 }}
                 disabled={isDisabled}
-                className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
+                className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors relative ${
                   isActive
                     ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                     : isDisabled
@@ -202,6 +230,12 @@ export default function ReportLayout({ children }: { children: ReactNode }) {
               >
                 <item.icon className={`w-4 h-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
                 {!collapsed && <span className="truncate">{item.label}</span>}
+                {!collapsed && showMenuAlert && (
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-500 animate-pulse ml-auto shrink-0" />
+                )}
+                {collapsed && showMenuAlert && (
+                  <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                )}
               </button>
             );
           })}
@@ -251,11 +285,102 @@ export default function ReportLayout({ children }: { children: ReactNode }) {
               </>
             )}
           </button>
+          {!collapsed && (
+            <div className="text-center text-[10px] text-muted-foreground/50 py-1">
+              v{APP_VERSION}
+            </div>
+          )}
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto relative">
+        {/* 右上角数据完整性报警 */}
+        {hasIntegrityIssue && (
+          <div ref={alertRef} className="absolute top-3 right-4 z-50">
+            <button
+              onClick={() => setShowAlertDetail(!showAlertDetail)}
+              className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 shadow-sm hover:bg-red-100 transition-colors"
+            >
+              <span className="relative">
+                <AlertTriangle className="w-4 h-4 text-red-500" />
+                <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-ping" />
+              </span>
+              <span className="text-xs text-red-700 font-medium">
+                {integrityAlert!.totalMissing} 条数据缺失人事归属
+              </span>
+            </button>
+
+            {/* 弹出详情面板 */}
+            {showAlertDetail && (
+              <div className="absolute top-full right-0 mt-2 w-96 bg-white rounded-xl shadow-xl border border-red-200 overflow-hidden">
+                <div className="px-4 py-3 bg-red-50 border-b border-red-100 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-red-500" />
+                    <span className="text-sm font-semibold text-red-800">人事数据缺失报警</span>
+                  </div>
+                  <button onClick={() => setShowAlertDetail(false)} className="text-gray-400 hover:text-gray-600">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="px-4 py-3 space-y-2">
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-orange-50 rounded-lg p-2">
+                      <div className="text-lg font-bold text-orange-700">{integrityAlert!.missingManagerCount}</div>
+                      <div className="text-[10px] text-orange-600">缺营业部经理</div>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-2">
+                      <div className="text-lg font-bold text-red-700">{integrityAlert!.missingDirectorCount}</div>
+                      <div className="text-[10px] text-red-600">缺总监</div>
+                    </div>
+                    <div className="bg-purple-50 rounded-lg p-2">
+                      <div className="text-lg font-bold text-purple-700">{integrityAlert!.missingBothCount}</div>
+                      <div className="text-[10px] text-purple-600">两者都缺</div>
+                    </div>
+                  </div>
+
+                  {integrityAlert!.missingByPerson.length > 0 && (
+                    <div className="mt-2">
+                      <div className="text-xs text-gray-500 mb-1.5 font-medium">缺失人员明细：</div>
+                      <div className="max-h-48 overflow-y-auto space-y-1">
+                        {integrityAlert!.missingByPerson.slice(0, 20).map((p, i) => (
+                          <div key={i} className="flex items-center justify-between text-xs bg-gray-50 rounded px-2.5 py-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-orange-700">{p.name}</span>
+                              <span className="text-gray-400">
+                                {p.role === "customerManager" ? "客户经理" : "营业部经理"}
+                              </span>
+                            </div>
+                            <div className="text-gray-500">
+                              {p.count}单 · {p.months.map(m => `${m}月`).join("、")}
+                            </div>
+                          </div>
+                        ))}
+                        {integrityAlert!.missingByPerson.length > 20 && (
+                          <div className="text-center text-[10px] text-gray-400 py-1">
+                            还有 {integrityAlert!.missingByPerson.length - 20} 人...
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="px-4 py-3 border-t bg-gray-50">
+                  <button
+                    onClick={() => {
+                      setShowAlertDetail(false);
+                      setLocation("/settings");
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    前往组织架构补全数据
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {children}
       </main>
     </div>

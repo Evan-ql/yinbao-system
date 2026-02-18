@@ -1,9 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Upload, CheckCircle2, Loader2, FileSpreadsheet, AlertTriangle, XCircle, Info, X } from "lucide-react";
 import { useReport } from "@/contexts/ReportContext";
 import DataTableEditor from "@/components/DataTableEditor";
+import StaffDiffPanel, { type DiffResult } from "@/components/StaffDiffPanel";
 
 interface ColumnValidation {
   missingCritical: string[];
@@ -17,13 +18,33 @@ export default function SourceDataPage() {
   const [uploading, setUploading] = useState(false);
   const [validation, setValidation] = useState<ColumnValidation | null>(null);
   const [showValidation, setShowValidation] = useState(false);
+  const [staffDiff, setStaffDiff] = useState<DiffResult | null>(null);
+  const [showStaffDiff, setShowStaffDiff] = useState(false);
   const { sourceRaw, setSourceRaw, setReportData } = useReport();
+
+  // 页面加载时自动检查未确认的人事差异
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/report/staff-diff');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.hasChanges && data.items?.length > 0) {
+            setStaffDiff(data);
+            // 不自动弹出，只显示提示条，用户点击后再弹出
+          }
+        }
+      } catch (_) {}
+    })();
+  }, []);
 
   const handleUpload = useCallback(async (f: File) => {
     setFile(f);
     setUploading(true);
     setValidation(null);
     setShowValidation(false);
+    setStaffDiff(null);
+    setShowStaffDiff(false);
     try {
       const formData = new FormData();
       formData.append("file", f);
@@ -46,14 +67,19 @@ export default function SourceDataPage() {
         setValidation(cv);
 
         if (cv.missingCritical.length > 0) {
-          // 关键列缺失 - 弹窗报错
           setShowValidation(true);
           toast.error(`数据缺少 ${cv.missingCritical.length} 个关键列，请检查！`, { duration: 5000 });
         } else if (cv.extraColumns.length > 0 || cv.missingOptional.length > 0) {
-          // 有多余列或缺少可选列 - 提示但不阻断
           setShowValidation(true);
           toast.warning("数据列有变化，请查看详情", { duration: 3000 });
         }
+      }
+
+      // 处理人事对比结果
+      if (data.staffDiff && data.staffDiff.hasChanges) {
+        setStaffDiff(data.staffDiff);
+        setShowStaffDiff(true);
+        toast.warning(`检测到 ${data.staffDiff.totalItems} 项人事结构差异，请确认`, { duration: 5000 });
       }
 
       setSourceRaw({
@@ -64,11 +90,11 @@ export default function SourceDataPage() {
 
       if (data.report) {
         setReportData(data.report);
-        if (!data.columnValidation?.missingCritical?.length) {
+        if (!data.columnValidation?.missingCritical?.length && !data.staffDiff?.hasChanges) {
           toast.success("2026数据导入成功，报表已自动生成");
         }
       } else {
-        if (!data.columnValidation?.missingCritical?.length) {
+        if (!data.columnValidation?.missingCritical?.length && !data.staffDiff?.hasChanges) {
           toast.success("2026数据导入成功");
         }
       }
@@ -83,6 +109,14 @@ export default function SourceDataPage() {
     if (!sourceRaw) return;
     setSourceRaw({ ...sourceRaw, rows: newData, totalCount: newData.length });
   }, [sourceRaw, setSourceRaw]);
+
+  const handleStaffDiffConfirmed = useCallback((report: any) => {
+    setShowStaffDiff(false);
+    setStaffDiff(null);
+    if (report) {
+      setReportData(report);
+    }
+  }, [setReportData]);
 
   return (
     <div className="p-6 space-y-5">
@@ -138,6 +172,20 @@ export default function SourceDataPage() {
         </CardContent>
       </Card>
 
+      {/* 人事差异提示条 */}
+      {staffDiff && !showStaffDiff && (
+        <button
+          onClick={() => setShowStaffDiff(true)}
+          className="w-full text-left px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition-colors bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
+        >
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>
+            检测到 <strong>{staffDiff.totalItems}</strong> 项人事结构差异（冲突 {staffDiff.conflictCount}，缺失 {staffDiff.missingCount}，新增 {staffDiff.newCount}）
+          </span>
+          <span className="ml-auto text-xs underline">查看并确认</span>
+        </button>
+      )}
+
       {/* 列校验结果提示条 */}
       {validation && !showValidation && (validation.missingCritical.length > 0 || validation.extraColumns.length > 0) && (
         <button
@@ -162,6 +210,15 @@ export default function SourceDataPage() {
         </button>
       )}
 
+      {/* 人事对比确认面板 */}
+      {showStaffDiff && staffDiff && (
+        <StaffDiffPanel
+          diffResult={staffDiff}
+          onClose={() => setShowStaffDiff(false)}
+          onConfirmed={handleStaffDiffConfirmed}
+        />
+      )}
+
       {/* 列校验弹窗 */}
       {showValidation && validation && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowValidation(false)}>
@@ -169,7 +226,6 @@ export default function SourceDataPage() {
             className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* 弹窗头部 */}
             <div className={`px-5 py-4 flex items-center justify-between ${
               validation.missingCritical.length > 0 ? "bg-red-50" : "bg-amber-50"
             }`}>
@@ -191,15 +247,12 @@ export default function SourceDataPage() {
               </button>
             </div>
 
-            {/* 弹窗内容 */}
             <div className="px-5 py-4 overflow-y-auto max-h-[60vh] space-y-4">
-              {/* 匹配成功 */}
               <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
                 <span>成功匹配 <strong>{validation.foundColumns.length}</strong> 个列</span>
               </div>
 
-              {/* 缺失关键列 */}
               {validation.missingCritical.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm font-medium text-red-700">
@@ -223,7 +276,6 @@ export default function SourceDataPage() {
                 </div>
               )}
 
-              {/* 缺失可选列 */}
               {validation.missingOptional.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm font-medium text-amber-700">
@@ -243,7 +295,6 @@ export default function SourceDataPage() {
                 </div>
               )}
 
-              {/* 多余的列 */}
               {validation.extraColumns.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm font-medium text-blue-700">
@@ -264,7 +315,6 @@ export default function SourceDataPage() {
               )}
             </div>
 
-            {/* 弹窗底部 */}
             <div className="px-5 py-3 border-t bg-gray-50 flex justify-end">
               <button
                 onClick={() => setShowValidation(false)}

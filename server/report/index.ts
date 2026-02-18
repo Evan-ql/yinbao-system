@@ -9,6 +9,7 @@ import { generateDeptData } from './deptSheet';
 import { generateChannelData } from './channelSheet';
 import { DataRow, safeFloat, safeStr, LookupTables } from './utils';
 import { fillMissingAttribution } from '../staffScanner';
+import { checkDataIntegrity, IntegrityAlert } from '../dataIntegrity';
 import { getSettingsData } from '../settingsApi';
 
 export interface ReportResult {
@@ -29,6 +30,7 @@ export interface ReportResult {
   channel: Record<string, any>;
   tracking: Record<string, any>;
   coreNetwork: Record<string, any>;
+  integrityAlert?: IntegrityAlert;
 }
 
 export function processReport(
@@ -54,8 +56,15 @@ export function processReport(
   console.log('[Report] Generating data source...');
   const dataRows = generateDataSource(sourceBuffer, lookups, monthStart, monthEnd);
 
-  console.log('[Report] Filling missing staff attribution...');
+  // [v1.0.3] 根据组织架构自动补全缺失的归属关系
   fillMissingAttribution(dataRows, monthEnd, renwangBuffer);
+  console.log('[Report] Auto-filled missing attribution from org structure');
+
+  console.log('[Report] Checking data integrity...');
+  const integrityAlert = checkDataIntegrity(dataRows);
+  if (integrityAlert.hasMissing) {
+    console.log(`[Report] ⚠️ Data integrity alert: ${integrityAlert.totalMissing} records missing attribution`);
+  }
 
   console.log('[Report] Generating network data...');
   const netRows = generateNetwork(renwangBuffer, dataRows, lookups, monthStart, monthEnd);
@@ -101,6 +110,7 @@ export function processReport(
     channel: channelData,
     tracking: trackingData,
     coreNetwork: coreNetworkData,
+    integrityAlert,
   };
 }
 

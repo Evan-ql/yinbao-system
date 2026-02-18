@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
-import SettingsTable, { ColumnDef } from "@/components/SettingsTable";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import SettingsTable, { ColumnDef, RowHighlight } from "@/components/SettingsTable";
 import { useSettingsData } from "@/hooks/useSettings";
-import { ArrowRightLeft } from "lucide-react";
+import { useReport } from "@/contexts/ReportContext";
+import { ArrowRightLeft, AlertTriangle } from "lucide-react";
 
 interface Staff {
   id: string;
@@ -42,11 +43,12 @@ const columns: ColumnDef[] = [
       { value: "customerManager", label: "客户经理" },
     ],
   },
-  { key: "parentId", label: "上级姓名", type: "text" },
+  { key: "parentId", label: "上级姓名", type: "text", sortable: true },
   {
     key: "status",
     label: "在岗状态",
     type: "select",
+    sortable: true,
     options: [
       { value: "active", label: "在职" },
       { value: "resigned", label: "离职" },
@@ -64,31 +66,11 @@ const columns: ColumnDef[] = [
   },
 ];
 
-// 状态标签颜色
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    active: "bg-green-100 text-green-700",
-    resigned: "bg-red-100 text-red-700",
-    transferred: "bg-yellow-100 text-yellow-700",
-  };
-  const labels: Record<string, string> = {
-    active: "在职",
-    resigned: "离职",
-    transferred: "调岗",
-  };
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] || "bg-gray-100 text-gray-700"}`}
-    >
-      {labels[status] || status}
-    </span>
-  );
-}
-
 export default function OrgStructureTab() {
   const { data, loading, add, update, remove, refresh } =
     useSettingsData<Staff>("staff");
-  const [viewMonth, setViewMonth] = useState<number>(0); // 0 = 查看全部
+  const { integrityAlert } = useReport();
+  const [viewMonth, setViewMonth] = useState<number>(0);
   const [transferModal, setTransferModal] = useState<{
     staff: Staff;
     newParentId: string;
@@ -97,7 +79,39 @@ export default function OrgStructureTab() {
   const [effectiveStaff, setEffectiveStaff] = useState<Staff[]>([]);
   const [loadingEffective, setLoadingEffective] = useState(false);
 
-  // 当选择了具体月份时，加载该月份的有效人员
+  // 构建缺失人员名单（用于行高亮）
+  const missingPersonNames = useMemo(() => {
+    if (!integrityAlert?.missingByPerson) return new Set<string>();
+    return new Set(integrityAlert.missingByPerson.map(p => p.name));
+  }, [integrityAlert]);
+
+  // 构建缺失人员详情映射（用于tooltip）
+  const missingPersonDetails = useMemo(() => {
+    if (!integrityAlert?.missingByPerson) return new Map<string, string>();
+    const map = new Map<string, string>();
+    for (const p of integrityAlert.missingByPerson) {
+      const roleLabel = p.role === "customerManager" ? "客户经理" : "营业部经理";
+      map.set(p.name, `${roleLabel} ${p.name}：${p.count}条保单缺失${p.missingField}归属（${p.months.map(m => m + "月").join("、")}）`);
+    }
+    return map;
+  }, [integrityAlert]);
+
+  // 行高亮回调
+  const getRowHighlight = useCallback((item: Staff): RowHighlight => {
+    // 上级为空且状态为在职的人员需要高亮
+    if (item.status === "active" && !item.parentId && item.role !== "director") {
+      return { highlighted: true, reason: `${item.name} 的上级姓名为空，请补全` };
+    }
+    // 在缺失名单中的人员需要高亮
+    if (missingPersonNames.has(item.name)) {
+      return {
+        highlighted: true,
+        reason: missingPersonDetails.get(item.name) || `${item.name} 存在数据缺失`
+      };
+    }
+    return { highlighted: false };
+  }, [missingPersonNames, missingPersonDetails]);
+
   const fetchEffective = useCallback(async (month: number) => {
     if (month === 0) return;
     setLoadingEffective(true);
@@ -119,7 +133,6 @@ export default function OrgStructureTab() {
     }
   }, [viewMonth, data, fetchEffective]);
 
-  // 执行调岗
   const handleTransfer = async () => {
     if (!transferModal) return;
     try {
@@ -141,13 +154,8 @@ export default function OrgStructureTab() {
     }
   };
 
-  // 根据视图模式筛选数据
   const getDisplayData = () => {
-    if (viewMonth === 0) {
-      // 查看全部记录
-      return data;
-    }
-    // 查看某月份的有效人员
+    if (viewMonth === 0) return data;
     return effectiveStaff;
   };
 
@@ -158,7 +166,6 @@ export default function OrgStructureTab() {
     (s) => s.role === "customerManager"
   );
 
-  // 统计各月份的人员变动数量
   const monthChanges: Record<number, number> = {};
   for (const s of data) {
     if (s.month > 0) {
@@ -166,8 +173,33 @@ export default function OrgStructureTab() {
     }
   }
 
+  // 统计各表格的缺失数量
+  const directorAlertCount = directors.filter(s => getRowHighlight(s).highlighted).length;
+  const deptManagerAlertCount = deptManagers.filter(s => getRowHighlight(s).highlighted).length;
+  const customerManagerAlertCount = customerManagers.filter(s => getRowHighlight(s).highlighted).length;
+
   return (
     <div className="space-y-6">
+      {/* 全局缺失提醒横幅 */}
+      {integrityAlert?.hasMissing && (
+        <div className="bg-orange-50 border border-orange-300 rounded-lg p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-orange-500 shrink-0 mt-0.5" />
+          <div>
+            <h4 className="text-sm font-semibold text-orange-800">人事数据需要补全</h4>
+            <p className="text-xs text-orange-700 mt-1">
+              当前有 <strong>{integrityAlert.totalMissing}</strong> 条保单的人事归属数据缺失
+              （缺营业部经理 {integrityAlert.missingManagerCount} 条，
+              缺总监 {integrityAlert.missingDirectorCount} 条，
+              两者都缺 {integrityAlert.missingBothCount} 条）。
+              请在下方表格中补全标橙的人员信息，补全后报表数据将自动更新。
+            </p>
+            <p className="text-xs text-orange-600 mt-1">
+              标橙行表示该人员的保单数据存在归属缺失，请检查其上级姓名是否正确。
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* 月份选择器 */}
       <div className="bg-card border border-border/60 rounded-lg p-4">
         <div className="flex items-center justify-between mb-3">
@@ -236,6 +268,8 @@ export default function OrgStructureTab() {
         }
         onDelete={remove}
         loading={viewMonth === 0 ? loading : loadingEffective}
+        rowHighlight={getRowHighlight}
+        alertCount={directorAlertCount}
       />
 
       <SettingsTable
@@ -249,6 +283,9 @@ export default function OrgStructureTab() {
         }
         onDelete={remove}
         loading={viewMonth === 0 ? loading : loadingEffective}
+        rowHighlight={getRowHighlight}
+        alertCount={deptManagerAlertCount}
+        alertMessage={deptManagerAlertCount > 0 ? `${deptManagerAlertCount} 名营业部经理的下属保单存在归属缺失，请检查` : undefined}
       />
 
       <SettingsTable
@@ -262,6 +299,9 @@ export default function OrgStructureTab() {
         }
         onDelete={remove}
         loading={viewMonth === 0 ? loading : loadingEffective}
+        rowHighlight={getRowHighlight}
+        alertCount={customerManagerAlertCount}
+        alertMessage={customerManagerAlertCount > 0 ? `${customerManagerAlertCount} 名客户经理的保单存在归属缺失，请检查其上级姓名` : undefined}
         extraActions={(item) => (
           <button
             onClick={() =>

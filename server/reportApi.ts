@@ -12,7 +12,8 @@ import { loadLookupTables } from './report/lookups';
 import { storagePut, storageGet } from './storage';
 import { syncFromTemplate, syncFromRenwang } from './syncSettings';
 import { scanStaffFromSource, fillMissingAttribution } from './staffScanner';
-import { onStaffChanged } from './settingsApi';
+import { compareThreeWay, DiffResult, DiffItem } from './staffDiff';
+import { onStaffChanged, getSettingsData, updateSettings } from './settingsApi';
 import { generateExcelBuffer } from './exportExcel';
 
 const upload = multer({
@@ -41,6 +42,10 @@ const S3_RENWANG_KEY = `${S3_PREFIX}/uploads/renwang.xlsx`;
 const S3_DAILY_KEY = `${S3_PREFIX}/uploads/daily.xlsx`;
 const S3_REPORT_CACHE_KEY = `${S3_PREFIX}/report_cache.json`;
 const S3_META_KEY = `${S3_PREFIX}/upload_meta.json`;
+const S3_STAFF_DIFF_KEY = `${S3_PREFIX}/staff_diff_pending.json`;
+
+// 内存缓存未确认的人事差异（服务器不重启就不会丢失）
+let pendingStaffDiff: DiffResult | null = null;
 
 // Template file path - downloaded from CDN on first use
 const TEMPLATE_URL = 'https://files.manuscdn.com/user_upload_by_module/session_file/310519663337503349/uDkGPpfkbqgXhhdf.xlsx';
@@ -61,6 +66,14 @@ async function getTemplateBuffer(): Promise<Buffer> {
 let storedSourceBuffer: Buffer | null = null;
 let storedRenwangBuffer: Buffer | null = null;
 let storedDailyBuffer: Buffer | null = null;
+
+// Helper to get buffer (may be null if not uploaded)
+async function getSourceBuffer(): Promise<Buffer | null> {
+  return storedSourceBuffer;
+}
+async function getRenwangBuffer(): Promise<Buffer | null> {
+  return storedRenwangBuffer;
+}
 
 // Cached report data
 let cachedReport: any = null;
@@ -377,23 +390,56 @@ router.post(
         console.error('[Report API] Template sync error:', e);
       }
 
-      // 自动扫描人员信息并更新组织架构
+      // [v1.0.3] 三方交叉对比：系统现有 vs 人网数据 vs 2026数据
+      let staffDiff: DiffResult | null = null;
       try {
-        console.log('[Report API] Scanning staff from source data...');
-        const scanResult = scanStaffFromSource(storedSourceBuffer);
-        console.log(`[Report API] Staff scan result: +${scanResult.added.length} added, ${scanResult.transferred.length} transferred, ${scanResult.unchanged} unchanged`);
+        console.log('[Report API] Running three-way staff comparison...');
+        const renwangBuf = await getRenwangBuffer();
+        staffDiff = compareThreeWay(storedSourceBuffer, renwangBuf);
+        console.log(`[Report API] Staff diff: ${staffDiff.totalItems} items (conflict: ${staffDiff.conflictCount}, missing: ${staffDiff.missingCount}, new: ${staffDiff.newCount}, inactive: ${staffDiff.inactiveCount}, consistent: ${staffDiff.consistentCount})`);
       } catch (e) {
-        console.error('[Report API] Staff scan error:', e);
+        console.error('[Report API] Staff diff error:', e);
+      }
+
+      // 过滤掉一致项，保留需要处理的差异（包括总监）
+      if (staffDiff) {
+        staffDiff.items = staffDiff.items.filter(it => it.diffType !== 'consistent');
+        staffDiff.totalItems = staffDiff.items.length;
+        staffDiff.hasChanges = staffDiff.items.length > 0;
+      }
+
+      // 持久化差异结果（内存 + 尝试S3）
+      if (staffDiff?.hasChanges) {
+        pendingStaffDiff = staffDiff;
+        try { await storagePut(S3_STAFF_DIFF_KEY, Buffer.from(JSON.stringify(staffDiff))); } catch (_) {}
+        console.log('[Report API] Staff diff cached:', staffDiff.totalItems, 'items');
+      } else {
+        pendingStaffDiff = null;
+        try { await storagePut(S3_STAFF_DIFF_KEY, Buffer.from('{}')); } catch (_) {}
+      }
+
+      // 附加组织架构中已有的总监和营业部经理列表，供前端下拉选择
+      if (staffDiff) {
+        const stg = getSettingsData();
+        const dirs = [...new Set((stg.staff || []).filter((s: any) => s.role === 'director' && s.status === 'active').map((s: any) => s.name))];
+        const mgrs = [...new Set((stg.staff || []).filter((s: any) => s.role === 'deptManager' && s.status === 'active').map((s: any) => s.name))];
+        (staffDiff as any).existingStaff = { directors: dirs, deptManagers: mgrs };
       }
 
       const rawRows = parseSourceFile(storedSourceBuffer);
-      const report = await tryAutoGenerate();
+      
+      // 如果没有人事变动，直接生成报表；否则等待用户确认后再生成
+      let report = null;
+      if (!staffDiff?.hasChanges) {
+        report = await tryAutoGenerate();
+      }
 
       res.json({
         rawData: rawRows.slice(0, 3000),
         totalCount: rawRows.length,
         report,
         columnValidation,
+        staffDiff,
       });
     } catch (error: any) {
       console.error('[Report API] Upload source error:', error);
@@ -423,14 +469,49 @@ router.post(
       console.log('[Report API] Renwang file:', fixedRenwangName, 'size:', req.file.buffer.length);
       await persistMeta({ renwangFileName: fixedRenwangName });
 
+      // [v1.0.3] 不再自动同步组织架构，改为三方对比
+      let staffDiff: DiffResult | null = null;
       try {
-        syncFromRenwang(storedRenwangBuffer);
+        console.log('[Report API] Running three-way staff comparison (renwang upload)...');
+        const sourceBuf = await getSourceBuffer();
+        staffDiff = compareThreeWay(sourceBuf, storedRenwangBuffer);
+        console.log(`[Report API] Staff diff: ${staffDiff.totalItems} items (conflict: ${staffDiff.conflictCount}, missing: ${staffDiff.missingCount}, new: ${staffDiff.newCount})`);
       } catch (e) {
-        console.error('[Report API] Renwang sync error:', e);
+        console.error('[Report API] Staff diff error:', e);
+      }
+
+      // 过滤掉一致项，保留需要处理的差异（包括总监）
+      if (staffDiff) {
+        staffDiff.items = staffDiff.items.filter(it => it.diffType !== 'consistent');
+        staffDiff.totalItems = staffDiff.items.length;
+        staffDiff.hasChanges = staffDiff.items.length > 0;
+      }
+
+      // 持久化差异结果（内存 + 尝试S3）
+      if (staffDiff?.hasChanges) {
+        pendingStaffDiff = staffDiff;
+        try { await storagePut(S3_STAFF_DIFF_KEY, Buffer.from(JSON.stringify(staffDiff))); } catch (_) {}
+        console.log('[Report API] Staff diff cached (renwang):', staffDiff.totalItems, 'items');
+      } else {
+        pendingStaffDiff = null;
+        try { await storagePut(S3_STAFF_DIFF_KEY, Buffer.from('{}')); } catch (_) {}
+      }
+
+      // 附加组织架构中已有的总监和营业部经理列表，供前端下拉选择
+      if (staffDiff) {
+        const stg = getSettingsData();
+        const dirs = [...new Set((stg.staff || []).filter((s: any) => s.role === 'director' && s.status === 'active').map((s: any) => s.name))];
+        const mgrs = [...new Set((stg.staff || []).filter((s: any) => s.role === 'deptManager' && s.status === 'active').map((s: any) => s.name))];
+        (staffDiff as any).existingStaff = { directors: dirs, deptManagers: mgrs };
       }
 
       const { agency, network } = parseRenwangFile(storedRenwangBuffer);
-      const report = await tryAutoGenerate();
+      
+      // 如果没有人事变动，直接生成报表
+      let report = null;
+      if (!staffDiff?.hasChanges) {
+        report = await tryAutoGenerate();
+      }
 
       res.json({
         rawData: {
@@ -440,6 +521,7 @@ router.post(
           networkTotalCount: network.length,
         },
         report,
+        staffDiff,
       });
     } catch (error: any) {
       console.error('[Report API] Upload renwang error:', error);
@@ -714,6 +796,158 @@ router.post('/clear-daily', async (_req: Request, res: Response) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message || '清空失败' });
   }
+});
+
+// ── 三方对比 API（手动触发） ──
+router.get('/staff-diff', async (_req: Request, res: Response) => {
+  try {
+    await restorePromise;
+
+    // 从组织架构中获取已有的总监和营业部经理列表，供前端下拉选择
+    const settings = getSettingsData();
+    const existingStaff = {
+      directors: (settings.staff || []).filter((s: any) => s.role === 'director' && s.status === 'active').map((s: any) => s.name),
+      deptManagers: (settings.staff || []).filter((s: any) => s.role === 'deptManager' && s.status === 'active').map((s: any) => s.name),
+    };
+    // 去重
+    existingStaff.directors = [...new Set(existingStaff.directors)];
+    existingStaff.deptManagers = [...new Set(existingStaff.deptManagers)];
+
+    // 优先从内存缓存读取
+    if (pendingStaffDiff && pendingStaffDiff.hasChanges) {
+      res.json({ ...pendingStaffDiff, existingStaff });
+      return;
+    }
+    // 内存没有，尝试从S3读取
+    try {
+      const { url } = await storageGet(S3_STAFF_DIFF_KEY);
+      const resp = await fetch(url);
+      if (resp.ok) {
+        const cached = await resp.json();
+        if (cached.hasChanges) {
+          pendingStaffDiff = cached; // 回填内存缓存
+          res.json({ ...cached, existingStaff });
+          return;
+        }
+      }
+    } catch (_) {}
+    // 没有差异数据
+    res.json({ hasChanges: false, totalItems: 0, items: [], consistentCount: 0, conflictCount: 0, missingCount: 0, newCount: 0, inactiveCount: 0, existingStaff });
+  } catch (error: any) {
+    console.error('[Staff Diff] Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ── 确认人事变动 API ──
+const DIRECT_PARENT = '公司直营';
+
+router.post('/staff-diff/confirm', async (req: Request, res: Response) => {
+  try {
+    const { items } = req.body as { items: DiffItem[] };
+    if (!items || !Array.isArray(items)) {
+      res.status(400).json({ error: '请提供确认后的变动列表' });
+      return;
+    }
+
+    const settings = getSettingsData();
+    let changeCount = 0;
+
+    for (const item of items) {
+      if (item.action === 'reject') continue; // 用户拒绝此项变动
+
+      const parentValue = item.confirmedParent || item.suggestedParent;
+      // "公司直营" 在系统中存储为 parentId = '公司直营'
+      const finalParent = parentValue || '';
+
+      if (item.diffType === 'new_person' || item.diffType === 'renwang_only') {
+        // 新增人员到组织架构
+        const exists = settings.staff.some(
+          (s: any) => s.name === item.name && s.role === item.role && s.status === 'active'
+        );
+        if (!exists) {
+          settings.staff.push({
+            id: String(Date.now() + Math.random()),
+            name: item.name,
+            code: item.code || '',
+            role: item.role as any,
+            parentId: finalParent,
+            status: 'active',
+            month: 0,
+          });
+          changeCount++;
+        }
+      } else if (item.diffType === 'conflict' || item.diffType === 'missing_parent') {
+        // 更新上级归属
+        const existing = settings.staff.find(
+          (s: any) => s.name === item.name && s.role === item.role && s.status === 'active'
+        );
+        if (existing) {
+          existing.parentId = finalParent;
+          changeCount++;
+        } else {
+          // 如果系统中没有，新增
+          settings.staff.push({
+            id: String(Date.now() + Math.random()),
+            name: item.name,
+            code: item.code || '',
+            role: item.role as any,
+            parentId: finalParent,
+            status: 'active',
+            month: 0,
+          });
+          changeCount++;
+        }
+      } else if (item.diffType === 'inactive') {
+        // 用户确认保留或标记离职
+        if (item.action === 'modify') {
+          // 标记为离职
+          const existing = settings.staff.find(
+            (s: any) => s.name === item.name && s.role === item.role && s.status === 'active'
+          );
+          if (existing) {
+            existing.status = 'resigned';
+            changeCount++;
+          }
+        }
+        // accept = 保留不变
+      }
+    }
+
+    // 保存设置
+    if (changeCount > 0) {
+      updateSettings(s => {
+        s.staff = settings.staff;
+      });
+      console.log(`[Staff Diff] Confirmed ${changeCount} changes`);
+    }
+
+    // 确认后清除内存缓存和持久化的差异数据
+    pendingStaffDiff = null;
+    try { await storagePut(S3_STAFF_DIFF_KEY, Buffer.from('{}')); } catch (_) {}
+
+    // 确认后自动重新生成报表
+    const report = await tryAutoGenerate();
+
+    res.json({
+      success: true,
+      changeCount,
+      report,
+    });
+  } catch (error: any) {
+    console.error('[Staff Diff Confirm] Error:', error);
+    res.status(500).json({ error: error.message || '确认失败' });
+  }
+});
+
+// ── 数据完整性检测 API ──
+router.get('/integrity-alert', async (_req: Request, res: Response) => {
+  await restorePromise;
+  if (!cachedReport) {
+    res.json({ hasMissing: false, totalMissing: 0 });
+    return;
+  }
+  res.json(cachedReport.integrityAlert || { hasMissing: false, totalMissing: 0 });
 });
 
 // ── 总表导出 ──
