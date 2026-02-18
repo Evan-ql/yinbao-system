@@ -24,7 +24,7 @@ interface StaffRecord {
   role: 'director' | 'deptManager' | 'customerManager';
   parentId: string;  // 上级的name（非id）
   status: 'active' | 'resigned' | 'transferred';
-  month?: number;    // 生效月份，0=全年默认
+  month: number;    // 生效月份，0=全年默认
 }
 
 interface ScannedPerson {
@@ -504,7 +504,11 @@ export function fillMissingAttribution(dataRows: any[], month?: number, renwangB
 
     // 如果缺少营业区总监，通过营业部经理查找
     const finalMgr = safeStr(row['营业部经理名称']);
-    if (!director && finalMgr) {
+    // 公司直营的保单，总监也标记为"公司直营"，不需要匹配真实总监
+    if (!director && finalMgr === '公司直营') {
+      row['营业区总监'] = '公司直营';
+      filledDir++;
+    } else if (!director && finalMgr) {
       const effectiveMgr = getEffective(finalMgr, 'deptManager', rowMonth);
       if (effectiveMgr && effectiveMgr.parentId) {
         row['营业区总监'] = effectiveMgr.parentId;
@@ -527,4 +531,156 @@ export function fillMissingAttribution(dataRows: any[], month?: number, renwangB
   if (filledMgr > 0 || filledDir > 0) {
     console.log(`[StaffScanner] Filled missing attribution: ${filledMgr} manager fields, ${filledDir} director fields`);
   }
+}
+
+/**
+ * 岗位轨迹：从2026数据源中按月提取指定人员的岗位信息
+ * 返回该人员在每个月的角色、上级、保单数等信息
+ */
+export interface TrackRecord {
+  month: number;
+  role: string;
+  roleLabel: string;
+  parentName: string;  // 上级姓名
+  policyCount: number; // 该月保单数
+  status: string;      // active / transferred / resigned
+  source: 'data' | 'system'; // 数据来源：data=2026数据, system=组织架构记录
+}
+
+export interface StaffTrack {
+  name: string;
+  code: string;
+  records: TrackRecord[];
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  director: '总监',
+  deptManager: '营业部经理',
+  customerManager: '客户经理',
+};
+
+export function extractStaffTrack(
+  name: string,
+  sourceBuffer: Buffer | null,
+): StaffTrack {
+  const settings = getSettingsData();
+  const staffList: StaffRecord[] = settings.staff || [];
+
+  // 找到该人员的工号
+  const personRecords = staffList.filter(s => s.name === name);
+  const code = personRecords.find(s => s.code)?.code || '';
+
+  const trackRecords: TrackRecord[] = [];
+
+  // 1. 从2026数据源中按月提取
+  if (sourceBuffer) {
+    const wb = XLSX.read(sourceBuffer, { type: 'buffer', cellDates: true });
+    const ws = findSourceSheet(wb);
+    if (ws) {
+      const rawData = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1 });
+      const headerRowIdx = detectHeaderRow(rawData);
+      const headerRow = rawData[headerRowIdx] || [];
+
+      const colIndex: Record<string, number> = {};
+      for (let c = 0; c < headerRow.length; c++) {
+        const n = safeStr(headerRow[c]);
+        if (n) {
+          colIndex[n] = c;
+          if (COL_NAME_MAP[n]) colIndex[COL_NAME_MAP[n]] = c;
+        }
+      }
+
+      const getCol = (row: any[], colName: string): any => {
+        if (colIndex[colName] !== undefined) return row[colIndex[colName]];
+        for (const [alias, canonical] of Object.entries(COL_NAME_MAP)) {
+          if (canonical === colName && colIndex[alias] !== undefined) return row[colIndex[alias]];
+        }
+        return undefined;
+      };
+
+      // 按月收集该人员出现的角色和上级
+      // key: `${month}|${role}` → { parentName, count }
+      const monthlyInfo = new Map<string, { parentName: string; count: number }>();
+
+      for (let r = headerRowIdx + 1; r < rawData.length; r++) {
+        const row = rawData[r];
+        if (!row || !row[0]) continue;
+
+        const dateVal = getCol(row, '保单签单日期');
+        const date = parseDate(dateVal);
+        if (!date) continue;
+        const month = date.getMonth() + 1;
+
+        const directorName = safeStr(getCol(row, '营业区总监'));
+        const mgrName = safeStr(getCol(row, '营业部经理名称'));
+        const cmName = safeStr(getCol(row, '业绩归属客户经理姓名'));
+
+        // 检查该人员是否以某种角色出现在这条保单中
+        const matches: { role: string; parentName: string }[] = [];
+
+        if (directorName === name) {
+          matches.push({ role: 'director', parentName: '' });
+        }
+        if (mgrName === name) {
+          matches.push({ role: 'deptManager', parentName: directorName || '' });
+        }
+        if (cmName === name) {
+          matches.push({ role: 'customerManager', parentName: mgrName || '' });
+        }
+
+        for (const m of matches) {
+          const key = `${month}|${m.role}`;
+          const existing = monthlyInfo.get(key);
+          if (existing) {
+            existing.count++;
+            if (!existing.parentName && m.parentName) {
+              existing.parentName = m.parentName;
+            }
+          } else {
+            monthlyInfo.set(key, { parentName: m.parentName, count: 1 });
+          }
+        }
+      }
+
+      // 转换为TrackRecord
+      for (const [key, info] of monthlyInfo) {
+        const [monthStr, role] = key.split('|');
+        trackRecords.push({
+          month: parseInt(monthStr),
+          role,
+          roleLabel: ROLE_LABELS[role] || role,
+          parentName: info.parentName,
+          policyCount: info.count,
+          status: 'active',
+          source: 'data',
+        });
+      }
+    }
+  }
+
+  // 2. 从组织架构中补充调岗/离职记录（这些在2026数据中看不到）
+  for (const s of personRecords) {
+    if (s.status === 'transferred' || s.status === 'resigned') {
+      // 检查是否已有该月该角色的数据记录
+      const exists = trackRecords.some(
+        t => t.month === (s.month || 0) && t.role === s.role && t.parentName === s.parentId
+      );
+      if (!exists) {
+        trackRecords.push({
+          month: s.month || 0,
+          role: s.role,
+          roleLabel: ROLE_LABELS[s.role] || s.role,
+          parentName: s.parentId || '',
+          policyCount: 0,
+          status: s.status,
+          source: 'system',
+        });
+      }
+    }
+  }
+
+  // 按月份排序
+  trackRecords.sort((a, b) => a.month - b.month || a.role.localeCompare(b.role));
+
+  return { name, code, records: trackRecords };
 }

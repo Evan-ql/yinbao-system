@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import SettingsTable, { ColumnDef, RowHighlight } from "@/components/SettingsTable";
+import OrgPickerModal from "@/components/OrgPickerModal";
 import { useSettingsData } from "@/hooks/useSettings";
 import { useReport } from "@/contexts/ReportContext";
 import { ArrowRightLeft, AlertTriangle } from "lucide-react";
@@ -16,21 +17,32 @@ interface Staff {
 
 const MONTH_OPTIONS = [
   { value: 0, label: "全年默认" },
-  { value: 1, label: "1月" },
-  { value: 2, label: "2月" },
-  { value: 3, label: "3月" },
-  { value: 4, label: "4月" },
-  { value: 5, label: "5月" },
-  { value: 6, label: "6月" },
-  { value: 7, label: "7月" },
-  { value: 8, label: "8月" },
-  { value: 9, label: "9月" },
-  { value: 10, label: "10月" },
-  { value: 11, label: "11月" },
-  { value: 12, label: "12月" },
+  ...Array.from({ length: 12 }, (_, i) => ({ value: i + 1, label: `${i + 1}月` })),
 ];
 
-const columns: ColumnDef[] = [
+const STATUS_COLUMN: ColumnDef = {
+  key: "status",
+  label: "在岗状态",
+  type: "select",
+  sortable: true,
+  options: [
+    { value: "active", label: "在职" },
+    { value: "resigned", label: "离职" },
+    { value: "transferred", label: "调岗" },
+  ],
+};
+
+const MONTH_COLUMN: ColumnDef = {
+  key: "month",
+  label: "生效月份",
+  type: "select",
+  options: MONTH_OPTIONS.map((m) => ({
+    value: String(m.value),
+    label: m.label,
+  })),
+};
+
+const BASE_COLUMNS: ColumnDef[] = [
   { key: "name", label: "姓名", type: "text", required: true },
   { key: "code", label: "工号", type: "text" },
   {
@@ -42,27 +54,6 @@ const columns: ColumnDef[] = [
       { value: "deptManager", label: "营业部经理" },
       { value: "customerManager", label: "客户经理" },
     ],
-  },
-  { key: "parentId", label: "上级姓名", type: "text", sortable: true },
-  {
-    key: "status",
-    label: "在岗状态",
-    type: "select",
-    sortable: true,
-    options: [
-      { value: "active", label: "在职" },
-      { value: "resigned", label: "离职" },
-      { value: "transferred", label: "调岗" },
-    ],
-  },
-  {
-    key: "month",
-    label: "生效月份",
-    type: "select",
-    options: MONTH_OPTIONS.map((m) => ({
-      value: String(m.value),
-      label: m.label,
-    })),
   },
 ];
 
@@ -76,16 +67,16 @@ export default function OrgStructureTab() {
     newParentId: string;
     month: number;
   } | null>(null);
+  const [showTransferPicker, setShowTransferPicker] = useState(false);
   const [effectiveStaff, setEffectiveStaff] = useState<Staff[]>([]);
   const [loadingEffective, setLoadingEffective] = useState(false);
 
-  // 构建缺失人员名单（用于行高亮）
+  // 构建缺失人员名单
   const missingPersonNames = useMemo(() => {
     if (!integrityAlert?.missingByPerson) return new Set<string>();
     return new Set(integrityAlert.missingByPerson.map(p => p.name));
   }, [integrityAlert]);
 
-  // 构建缺失人员详情映射（用于tooltip）
   const missingPersonDetails = useMemo(() => {
     if (!integrityAlert?.missingByPerson) return new Map<string, string>();
     const map = new Map<string, string>();
@@ -96,13 +87,10 @@ export default function OrgStructureTab() {
     return map;
   }, [integrityAlert]);
 
-  // 行高亮回调
   const getRowHighlight = useCallback((item: Staff): RowHighlight => {
-    // 上级为空且状态为在职的人员需要高亮
     if (item.status === "active" && !item.parentId && item.role !== "director") {
       return { highlighted: true, reason: `${item.name} 的上级姓名为空，请补全` };
     }
-    // 在缺失名单中的人员需要高亮
     if (missingPersonNames.has(item.name)) {
       return {
         highlighted: true,
@@ -154,16 +142,14 @@ export default function OrgStructureTab() {
     }
   };
 
-  const getDisplayData = () => {
-    if (viewMonth === 0) return data;
-    return effectiveStaff;
-  };
-
-  const displayData = getDisplayData();
+  const displayData = viewMonth === 0 ? data : effectiveStaff;
   const directors = displayData.filter((s) => s.role === "director");
   const deptManagers = displayData.filter((s) => s.role === "deptManager");
   const customerManagers = displayData.filter(
-    (s) => s.role === "customerManager"
+    (s) => s.role === "customerManager" && s.parentId !== "公司直营"
+  );
+  const directSalesManagers = displayData.filter(
+    (s) => s.role === "customerManager" && s.parentId === "公司直营"
   );
 
   const monthChanges: Record<number, number> = {};
@@ -172,6 +158,28 @@ export default function OrgStructureTab() {
       monthChanges[s.month] = (monthChanges[s.month] || 0) + 1;
     }
   }
+
+  // 列定义：parentId 使用 org-picker 类型
+  const directorColumns: ColumnDef[] = useMemo(() => [
+    ...BASE_COLUMNS,
+    { key: "parentId", label: "上级姓名", type: "text" as const, sortable: true },
+    STATUS_COLUMN,
+    MONTH_COLUMN,
+  ], []);
+
+  const deptManagerColumns: ColumnDef[] = useMemo(() => [
+    ...BASE_COLUMNS,
+    { key: "parentId", label: "上级姓名", type: "org-picker" as const, sortable: true, orgCategories: ["director", "direct"] as ("director" | "deptManager" | "direct")[] },
+    STATUS_COLUMN,
+    MONTH_COLUMN,
+  ], []);
+
+  const customerManagerColumns: ColumnDef[] = useMemo(() => [
+    ...BASE_COLUMNS,
+    { key: "parentId", label: "上级姓名", type: "org-picker" as const, sortable: true, orgCategories: ["deptManager", "direct"] as ("director" | "deptManager" | "direct")[] },
+    STATUS_COLUMN,
+    MONTH_COLUMN,
+  ], []);
 
   // 统计各表格的缺失数量
   const directorAlertCount = directors.filter(s => getRowHighlight(s).highlighted).length;
@@ -260,8 +268,9 @@ export default function OrgStructureTab() {
       <SettingsTable
         title="总监"
         description="管理区域总监信息"
-        columns={columns}
+        columns={directorColumns}
         data={directors}
+        allStaff={displayData}
         onAdd={(item) => add({ ...item, month: Number(item.month) || 0 })}
         onUpdate={(id, item) =>
           update(id, { ...item, month: Number(item.month) || 0 })
@@ -272,11 +281,70 @@ export default function OrgStructureTab() {
         alertCount={directorAlertCount}
       />
 
+      {/* 公司直营区域 */}
+      {directSalesManagers.length > 0 && (
+        <div className="bg-card border border-border/60 rounded-lg">
+          <div className="px-4 py-3 border-b border-border/40">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  公司直营
+                  <span className="text-[10px] font-normal px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">
+                    不统计到总监
+                  </span>
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  公司直营渠道的客户经理，不归属任何营业部经理和总监
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-muted/30">
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">姓名</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">工号</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">角色</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">归属</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">在岗状态</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">生效月份</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/40">
+                {directSalesManagers.map((s) => (
+                  <tr key={s.id} className="hover:bg-muted/20">
+                    <td className="px-4 py-2.5 font-medium">{s.name}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground">{s.code || "-"}</td>
+                    <td className="px-4 py-2.5">客户经理</td>
+                    <td className="px-4 py-2.5">
+                      <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">公司直营</span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className={`text-xs ${s.status === "active" ? "text-emerald-600" : "text-gray-400"}`}>
+                        {s.status === "active" ? "在职" : s.status === "resigned" ? "离职" : "调岗"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-muted-foreground">
+                      {s.month === 0 ? "-" : `${s.month}月`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="px-4 py-2 text-xs text-muted-foreground border-t border-border/40">
+            共 {directSalesManagers.length} 条记录
+          </div>
+        </div>
+      )}
+
       <SettingsTable
         title="营业部经理"
-        description="管理各营业部经理信息，上级姓名填写所属总监姓名"
-        columns={columns}
+        description="管理各营业部经理信息，点击上级姓名可选择所属总监或公司直营"
+        columns={deptManagerColumns}
         data={deptManagers}
+        allStaff={displayData}
         onAdd={(item) => add({ ...item, month: Number(item.month) || 0 })}
         onUpdate={(id, item) =>
           update(id, { ...item, month: Number(item.month) || 0 })
@@ -290,9 +358,10 @@ export default function OrgStructureTab() {
 
       <SettingsTable
         title="客户经理"
-        description="管理各客户经理信息，上级姓名填写所属营业部经理姓名。点击调岗按钮可快速调岗。"
-        columns={columns}
+        description="管理各客户经理信息，点击上级姓名可选择所属营业部经理或公司直营。点击调岗按钮可快速调岗。"
+        columns={customerManagerColumns}
         data={customerManagers}
+        allStaff={displayData}
         onAdd={(item) => add({ ...item, month: Number(item.month) || 0 })}
         onUpdate={(id, item) =>
           update(id, { ...item, month: Number(item.month) || 0 })
@@ -326,37 +395,35 @@ export default function OrgStructureTab() {
             <h3 className="text-lg font-semibold mb-4">调岗操作</h3>
             <div className="space-y-4">
               <div>
-                <label className="text-sm text-muted-foreground">
-                  调岗人员
-                </label>
+                <label className="text-sm text-muted-foreground">调岗人员</label>
                 <p className="text-sm font-medium">
                   {transferModal.staff.name}（{transferModal.staff.code}）
                 </p>
               </div>
               <div>
-                <label className="text-sm text-muted-foreground">
-                  当前上级
-                </label>
+                <label className="text-sm text-muted-foreground">当前上级</label>
                 <p className="text-sm font-medium">
                   {transferModal.staff.parentId || "无"}
                 </p>
               </div>
               <div>
                 <label className="block text-sm text-muted-foreground mb-1">
-                  调入新上级（营业部经理姓名）
+                  调入新上级
                 </label>
-                <input
-                  type="text"
-                  value={transferModal.newParentId}
-                  onChange={(e) =>
-                    setTransferModal({
-                      ...transferModal,
-                      newParentId: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 text-sm border border-border rounded-md bg-background"
-                  placeholder="请输入新上级的姓名"
-                />
+                <button
+                  type="button"
+                  onClick={() => setShowTransferPicker(true)}
+                  className="w-full px-3 py-2 text-sm border border-border rounded-md bg-background text-left hover:bg-muted/50 transition-colors flex items-center justify-between"
+                >
+                  <span className={transferModal.newParentId ? "" : "text-muted-foreground"}>
+                    {transferModal.newParentId === "公司直营" ? (
+                      <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">公司直营</span>
+                    ) : (
+                      transferModal.newParentId || "点击选择新上级..."
+                    )}
+                  </span>
+                  <span className="text-muted-foreground text-xs">选择</span>
+                </button>
               </div>
               <div>
                 <label className="block text-sm text-muted-foreground mb-1">
@@ -407,6 +474,21 @@ export default function OrgStructureTab() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 调岗弹窗的 OrgPicker */}
+      {showTransferPicker && transferModal && (
+        <OrgPickerModal
+          title="选择调入新上级"
+          currentValue={transferModal.newParentId}
+          allStaff={displayData}
+          categories={["deptManager", "direct"]}
+          onSelect={(value) => {
+            setTransferModal({ ...transferModal, newParentId: value });
+            setShowTransferPicker(false);
+          }}
+          onClose={() => setShowTransferPicker(false)}
+        />
       )}
     </div>
   );

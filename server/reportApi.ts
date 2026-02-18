@@ -11,7 +11,7 @@ import { parseDailyFile } from './report/dailyList';
 import { loadLookupTables } from './report/lookups';
 import { storagePut, storageGet } from './storage';
 import { syncFromTemplate, syncFromRenwang } from './syncSettings';
-import { scanStaffFromSource, fillMissingAttribution } from './staffScanner';
+import { scanStaffFromSource, fillMissingAttribution, extractStaffTrack } from './staffScanner';
 import { compareThreeWay, DiffResult, DiffItem } from './staffDiff';
 import { onStaffChanged, getSettingsData, updateSettings } from './settingsApi';
 import { generateExcelBuffer } from './exportExcel';
@@ -948,6 +948,19 @@ router.get('/integrity-alert', async (_req: Request, res: Response) => {
     return;
   }
   res.json(cachedReport.integrityAlert || { hasMissing: false, totalMissing: 0 });
+});
+
+// ── 岗位轨迹 API ──
+router.get('/staff-track/:name', async (req: Request, res: Response) => {
+  try {
+    await restorePromise;
+    const name = decodeURIComponent(req.params.name);
+    const track = extractStaffTrack(name, storedSourceBuffer);
+    res.json(track);
+  } catch (error: any) {
+    console.error('[Staff Track] Error:', error);
+    res.status(500).json({ error: error.message || '查询失败' });
+  }
 });
 
 // ── 总表导出 ──

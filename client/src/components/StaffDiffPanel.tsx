@@ -237,7 +237,7 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
                         : "bg-white border-gray-100 opacity-50 cursor-default"
                   }`}
                   disabled={count === 0}
-                  style={filterType === key ? { ringColor: cfg.textColor } : undefined}
+                  style={filterType === key ? { outlineColor: cfg.textColor } as React.CSSProperties : undefined}
                 >
                   <div className={`text-xl font-bold ${count > 0 ? cfg.color : "text-gray-300"}`}>{count}</div>
                   <div className="text-[10px] text-gray-500 mt-0.5">{cfg.label}</div>
