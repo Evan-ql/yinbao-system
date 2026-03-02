@@ -49,7 +49,7 @@ export default function TieganPage() {
   };
 
   return (
-    <DeptSubPageWrapper title="铁杆网点" description="各营业部铁杆网点开单情况">
+    <DeptSubPageWrapper title="铁杆网点" description="各营业部铁杆网点开单情况" extraControls={<ExportButton onClick={handleExport} />}>
       {/* 营业部汇总表 */}
       <Card>
         <CardHeader className="pb-3">

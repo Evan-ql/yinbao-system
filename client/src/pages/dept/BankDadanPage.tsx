@@ -25,7 +25,7 @@ export default function BankDadanPage() {
   };
 
   return (
-    <DeptSubPageWrapper title="全渠道大单分布" description="按银行渠道统计大单件数">
+    <DeptSubPageWrapper title="全渠道大单分布" description="按银行渠道统计大单件数" extraControls={<ExportButton onClick={handleExport} />}>
       <Card>
         <CardContent className="pt-4">
           <div className="overflow-x-auto">

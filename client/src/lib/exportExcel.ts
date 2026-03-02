@@ -1,9 +1,9 @@
 /**
  * 通用 Excel 导出工具（前端）
- * 使用 xlsx 库生成带样式的 Excel 文件并下载
+ * 使用 xlsx-js-style 库生成带样式的 Excel 文件并下载
  * v1.1.0
  */
-import * as XLSX from "xlsx";
+import XLSX from "xlsx-js-style";
 
 /** 列定义 */
 export interface ExportColumn {
@@ -38,8 +38,85 @@ export interface ExportSheet {
   totalLabel?: string;
 }
 
+/* ────────── 样式定义 ────────── */
+
+/** 标题行样式：深蓝背景 + 白色粗体 + 居中 */
+const titleStyle: XLSX.CellStyle = {
+  font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } },
+  fill: { fgColor: { rgb: "1F4E79" } },
+  alignment: { horizontal: "center", vertical: "center" },
+  border: {
+    top: { style: "thin", color: { rgb: "999999" } },
+    bottom: { style: "thin", color: { rgb: "999999" } },
+    left: { style: "thin", color: { rgb: "999999" } },
+    right: { style: "thin", color: { rgb: "999999" } },
+  },
+};
+
+/** 表头行样式：中蓝背景 + 白色粗体 + 居中 */
+const headerStyle: XLSX.CellStyle = {
+  font: { bold: true, sz: 11, color: { rgb: "FFFFFF" } },
+  fill: { fgColor: { rgb: "2E75B6" } },
+  alignment: { horizontal: "center", vertical: "center", wrapText: true },
+  border: {
+    top: { style: "thin", color: { rgb: "AAAAAA" } },
+    bottom: { style: "thin", color: { rgb: "AAAAAA" } },
+    left: { style: "thin", color: { rgb: "AAAAAA" } },
+    right: { style: "thin", color: { rgb: "AAAAAA" } },
+  },
+};
+
+/** 数据行样式（偶数行）：白色背景 */
+const dataStyleEven: XLSX.CellStyle = {
+  font: { sz: 10 },
+  alignment: { horizontal: "center", vertical: "center" },
+  border: {
+    top: { style: "thin", color: { rgb: "CCCCCC" } },
+    bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+    left: { style: "thin", color: { rgb: "CCCCCC" } },
+    right: { style: "thin", color: { rgb: "CCCCCC" } },
+  },
+};
+
+/** 数据行样式（奇数行）：浅蓝背景（斑马纹） */
+const dataStyleOdd: XLSX.CellStyle = {
+  font: { sz: 10 },
+  fill: { fgColor: { rgb: "D6E4F0" } },
+  alignment: { horizontal: "center", vertical: "center" },
+  border: {
+    top: { style: "thin", color: { rgb: "CCCCCC" } },
+    bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+    left: { style: "thin", color: { rgb: "CCCCCC" } },
+    right: { style: "thin", color: { rgb: "CCCCCC" } },
+  },
+};
+
+/** 合计行样式：浅橙背景 + 粗体 */
+const totalStyle: XLSX.CellStyle = {
+  font: { bold: true, sz: 11, color: { rgb: "000000" } },
+  fill: { fgColor: { rgb: "FCE4D6" } },
+  alignment: { horizontal: "center", vertical: "center" },
+  border: {
+    top: { style: "medium", color: { rgb: "999999" } },
+    bottom: { style: "medium", color: { rgb: "999999" } },
+    left: { style: "thin", color: { rgb: "999999" } },
+    right: { style: "thin", color: { rgb: "999999" } },
+  },
+};
+
+/** 数字格式化样式（继承基础样式后覆盖 numFmt） */
+function withNumberFmt(base: XLSX.CellStyle, type?: string): XLSX.CellStyle {
+  if (type === "percent") {
+    return { ...base, numFmt: "0.00%" };
+  }
+  if (type === "number") {
+    return { ...base, numFmt: "#,##0.00" };
+  }
+  return base;
+}
+
 /**
- * 构建一个 worksheet
+ * 构建一个 worksheet（带完整样式）
  */
 function buildSheet(
   columns: ExportColumn[],
@@ -49,29 +126,47 @@ function buildSheet(
   totalLabel?: string,
 ): XLSX.WorkSheet {
   const wsData: any[][] = [];
+  let rowIdx = 0;
 
   // 标题行
   if (title) {
-    wsData.push([title]);
+    const titleRow = [title, ...Array(columns.length - 1).fill("")];
+    wsData.push(titleRow);
+    rowIdx++;
   }
 
   // 表头行
   wsData.push(columns.map((c) => c.header));
+  const headerRowIdx = rowIdx;
+  rowIdx++;
 
   // 数据行
+  const dataStartRow = rowIdx;
   for (const row of data) {
     const rowData: any[] = [];
     for (const col of columns) {
       let val = row[col.key];
-      if (col.type === "number" && val !== undefined && val !== null) {
+      if (col.type === "number" && val !== undefined && val !== null && val !== "") {
         val = Number(val) || 0;
+      }
+      if (col.type === "percent" && val !== undefined && val !== null && val !== "") {
+        // 百分比：如果值已经是如 "85.5%" 这样的字符串，转为小数
+        if (typeof val === "string" && val.endsWith("%")) {
+          val = parseFloat(val) / 100;
+        } else {
+          val = Number(val) || 0;
+          // 如果值大于1，认为是百分比数值（如 85.5），转为小数
+          if (val > 1) val = val / 100;
+        }
       }
       rowData.push(val ?? "");
     }
     wsData.push(rowData);
+    rowIdx++;
   }
 
   // 合计行
+  let totalRowIdx = -1;
   if (totalRow) {
     const totalData: any[] = [];
     for (let i = 0; i < columns.length; i++) {
@@ -80,28 +175,73 @@ function buildSheet(
       } else {
         const col = columns[i];
         let val = totalRow[col.key];
-        if (col.type === "number" && val !== undefined && val !== null) {
+        if (col.type === "number" && val !== undefined && val !== null && val !== "") {
           val = Number(val) || 0;
         }
         totalData.push(val ?? "");
       }
     }
     wsData.push(totalData);
+    totalRowIdx = rowIdx;
+    rowIdx++;
   }
 
+  // 创建 worksheet
   const ws = XLSX.utils.aoa_to_sheet(wsData);
 
-  // 设置列宽
-  ws["!cols"] = columns.map((c) => ({
-    wch: c.width || Math.max(c.header.length * 2 + 2, 10),
-  }));
+  // ────────── 应用样式 ──────────
 
-  // 如果有标题行，合并标题单元格
+  // 标题行样式
   if (title) {
+    for (let c = 0; c < columns.length; c++) {
+      const addr = XLSX.utils.encode_cell({ r: 0, c });
+      if (ws[addr]) ws[addr].s = titleStyle;
+    }
+    // 合并标题单元格
     ws["!merges"] = [
       { s: { r: 0, c: 0 }, e: { r: 0, c: columns.length - 1 } },
     ];
   }
+
+  // 表头行样式
+  for (let c = 0; c < columns.length; c++) {
+    const addr = XLSX.utils.encode_cell({ r: headerRowIdx, c });
+    if (ws[addr]) ws[addr].s = headerStyle;
+  }
+
+  // 数据行样式（斑马纹）
+  for (let r = dataStartRow; r < dataStartRow + data.length; r++) {
+    const isOdd = (r - dataStartRow) % 2 === 1;
+    const baseStyle = isOdd ? dataStyleOdd : dataStyleEven;
+    for (let c = 0; c < columns.length; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (ws[addr]) {
+        ws[addr].s = withNumberFmt(baseStyle, columns[c].type);
+      }
+    }
+  }
+
+  // 合计行样式
+  if (totalRowIdx >= 0) {
+    for (let c = 0; c < columns.length; c++) {
+      const addr = XLSX.utils.encode_cell({ r: totalRowIdx, c });
+      if (ws[addr]) ws[addr].s = totalStyle;
+    }
+  }
+
+  // 设置列宽（根据表头长度和数据自适应）
+  ws["!cols"] = columns.map((col) => {
+    const headerLen = col.header.length * 2 + 2;
+    const defaultWidth = col.width || Math.max(headerLen, 12);
+    return { wch: defaultWidth };
+  });
+
+  // 设置行高
+  ws["!rows"] = [];
+  if (title) {
+    ws["!rows"][0] = { hpt: 30 }; // 标题行高
+  }
+  ws["!rows"][headerRowIdx] = { hpt: 24 }; // 表头行高
 
   return ws;
 }
@@ -109,9 +249,9 @@ function buildSheet(
 /**
  * 导出 Excel 文件
  * 支持多种调用方式：
- * 1. exportToExcel(columns, data, fileName)
- * 2. exportToExcel(data, columns, fileName)
- * 3. exportToExcel({ columns, data, fileName, ... })
+ * 1. exportToExcel({ columns, data, fileName, ... })
+ * 2. exportToExcel(columns, data, fileName)
+ * 3. exportToExcel(data, columns, fileName)
  */
 export function exportToExcel(
   arg1: ExportColumn[] | Record<string, any>[] | ExportOptions,
@@ -139,19 +279,15 @@ export function exportToExcel(
     sheets = opts.sheets;
   } else if (Array.isArray(arg1) && Array.isArray(arg2)) {
     // 两个数组 + 文件名
-    // 判断哪个是 columns：columns 数组的元素有 header 属性
     const first = arg1 as any[];
     const second = arg2 as any[];
     if (first.length > 0 && first[0].header) {
-      // exportToExcel(columns, data, fileName)
       columns = first as ExportColumn[];
       data = second as Record<string, any>[];
     } else if (second.length > 0 && second[0].header) {
-      // exportToExcel(data, columns, fileName)
       columns = second as ExportColumn[];
       data = first as Record<string, any>[];
     } else {
-      // 默认第一个是 columns
       columns = first as ExportColumn[];
       data = second as Record<string, any>[];
     }
@@ -164,7 +300,6 @@ export function exportToExcel(
   const wb = XLSX.utils.book_new();
 
   if (sheets && sheets.length > 0) {
-    // 多 sheet 模式
     for (const sheet of sheets) {
       const sheetData = sheet.data || sheet.dataSource || [];
       const ws = buildSheet(
@@ -177,7 +312,6 @@ export function exportToExcel(
       XLSX.utils.book_append_sheet(wb, ws, sheet.sheetName);
     }
   } else {
-    // 单 sheet 模式
     const ws = buildSheet(columns!, data!, title, totalRow, totalLabel);
     XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
   }

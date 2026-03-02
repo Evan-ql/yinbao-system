@@ -21,7 +21,7 @@ export default function DailyPremiumPage() {
   };
 
   return (
-    <DeptSubPageWrapper title="日保费数据" description="当日各营业部实时保费数据">
+    <DeptSubPageWrapper title="日保费数据" description="当日各营业部实时保费数据" extraControls={<ExportButton onClick={handleExport} />}>
       <Card>
         <CardContent className="pt-4">
           <div className="overflow-x-auto">

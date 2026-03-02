@@ -58,7 +58,7 @@ export default function BusinessDataPage() {
   };
 
   return (
-    <DeptSubPageWrapper title="业务数据" extraControls={modeToggle}>
+    <DeptSubPageWrapper title="业务数据" extraControls={<>{modeToggle}<ExportButton onClick={handleExport} /></>}>
       <Card>
         <CardContent className="pt-4">
           <div className="overflow-x-auto">

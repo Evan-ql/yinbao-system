@@ -31,8 +31,9 @@ export default function PremiumDistPage() {
 
   return (
     <DeptSubPageWrapper
-      title={`${mode === "qj" ? "年交" : "趸交"}保费分布图`}
-      description={`各营业部在各银行渠道的${mode === "qj" ? "年交" : "趸交"}保费金额`}
+      title={`${mode === "qj" ? "年交" : "赸交"}保费分布图`}
+      description={`各营业部在各银行渠道的${mode === "qj" ? "年交" : "赸交"}保费金额`}
+      extraControls={<ExportButton onClick={handleExport} />}
     >
       <div className="flex justify-end mb-3">
         <div className="inline-flex rounded-lg border border-border overflow-hidden text-xs">
