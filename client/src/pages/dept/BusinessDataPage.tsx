@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function BusinessDataPage() {
   const { reportData } = useReport();
@@ -35,6 +37,25 @@ export default function BusinessDataPage() {
       </button>
     </div>
   );
+
+
+  const handleExport = () => {
+    if (!ranking) return;
+    const columns: ExportColumn[] = [
+      { header: "排名", key: "rank", width: 8 },
+      { header: "营业部", key: "dept", width: 14 },
+      { header: "期交保费", key: "qjbf", type: "number", width: 14 },
+      { header: "非邮期交", key: "feiyouQj", type: "number", width: 14 },
+      { header: "规保", key: "guibao", type: "number", width: 14 },
+      { header: "趸交", key: "dc", type: "number", width: 14 },
+      { header: "件数", key: "js", type: "number", width: 10 },
+    ];
+    exportToExcel({
+      columns,
+      data: ranking,
+      fileName: `业务数据_${mode === "feiyou" ? "非邮" : "全渠道"}`,
+    });
+  };
 
   return (
     <DeptSubPageWrapper title="业务数据" extraControls={modeToggle}>

@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { pct, fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function TieganPage() {
   const { reportData } = useReport();
@@ -25,6 +27,26 @@ export default function TieganPage() {
   // 统计已开单/未开单人数
   const kaidanCount = filteredDetails.filter((d: any) => d.kaidan).length;
   const weiKaidanCount = filteredDetails.filter((d: any) => !d.kaidan).length;
+
+
+  const handleExport = () => {
+    if (!tieganData || tieganData.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "营业部", key: "dept", width: 14 },
+      { header: "铁杆网点数", key: "count", type: "number", width: 12 },
+      { header: "已开单", key: "opened", type: "number", width: 10 },
+      { header: "未开单", key: "notOpened", type: "number", width: 10 },
+      { header: "开单率", key: "rate", width: 10 },
+    ];
+    const data = tieganData.map((r: any) => ({
+      dept: r.dept || r.name || "",
+      count: r.count || 0,
+      opened: r.opened || 0,
+      notOpened: r.notOpened || 0,
+      rate: r.rate || "0%",
+    }));
+    exportToExcel({ columns, data, fileName: "铁杆网点" });
+  };
 
   return (
     <DeptSubPageWrapper title="铁杆网点" description="各营业部铁杆网点开单情况">

@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import { fmt, pct, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function ProductDetailTab() {
   const { reportData } = useReport();
@@ -9,11 +11,31 @@ export default function ProductDetailTab() {
 
   const { productDetail, productDetailTotals } = data;
 
+  const handleExport = () => {
+    if (!productDetail || productDetail.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "产品名称", key: "name", width: 20 },
+      { header: "年交", key: "qj", type: "number", width: 14 },
+      { header: "占比", key: "ratioStr", width: 10 },
+      { header: "3年", key: "y3", type: "number", width: 14 },
+      { header: "5年", key: "y5", type: "number", width: 14 },
+      { header: "趸交", key: "dc", type: "number", width: 14 },
+    ];
+    const exportData = productDetail.map((p: any) => ({
+      ...p,
+      ratioStr: (p.ratio * 100).toFixed(1) + "%",
+    }));
+    exportToExcel({ columns, data: exportData, fileName: "业务数据_产品" });
+  };
+
   return (
     <div className="p-4 space-y-3">
-      <p className="text-xs text-muted-foreground">
-        各产品年交保费、占比、按缴费年限分布及趸交数据
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          各产品年交保费、占比、按缴费年限分布及趸交数据
+        </p>
+        <ExportButton onClick={handleExport} />
+      </div>
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">业务数据—产品</CardTitle>

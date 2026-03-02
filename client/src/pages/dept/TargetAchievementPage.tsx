@@ -3,6 +3,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { fmt, pct, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 type Level = "director" | "deptManager" | "customerManager" | "dept" | "network";
 
@@ -299,8 +301,46 @@ export default function TargetAchievementPage() {
 
   const colSpanName = 2 + (showParent ? 1 : 0) + (showExtra ? 1 : 0);
 
+  const handleExport = () => {
+    if (achievements.length === 0) return;
+    const cols: ExportColumn[] = [
+      { header: "序号", key: "idx", width: 8 },
+      { header: LEVEL_MAP[level].label, key: "name", width: 14 },
+    ];
+    if (showExtra) cols.push({ header: "银行渠道", key: "extra", width: 14 });
+    if (showParent) cols.push({ header: parentLabel, key: "parent", width: 14 });
+    cols.push(
+      { header: "期交目标", key: "qjTarget", type: "number", width: 14 },
+      { header: "期交完成", key: "qjActual", type: "number", width: 14 },
+      { header: "期交完成率", key: "qjPctStr", width: 10 },
+      { header: "期交差距", key: "qjGap", type: "number", width: 14 },
+      { header: "趸交目标", key: "dcTarget", type: "number", width: 14 },
+      { header: "趸交完成", key: "dcActual", type: "number", width: 14 },
+      { header: "趸交完成率", key: "dcPctStr", width: 10 },
+      { header: "趸交差距", key: "dcGap", type: "number", width: 14 },
+      { header: "件数", key: "count", type: "number", width: 10 },
+    );
+    const data = achievements.map((r, i) => ({
+      idx: i + 1,
+      name: r.name,
+      extra: r.extra || "",
+      parent: r.parent || "",
+      qjTarget: r.qjTarget,
+      qjActual: r.qjActual,
+      qjPctStr: r.qjTarget > 0 ? (r.qjPct * 100).toFixed(1) + "%" : "-",
+      qjGap: r.qjGap,
+      dcTarget: r.dcTarget,
+      dcActual: r.dcActual,
+      dcPctStr: r.dcTarget > 0 ? (r.dcPct * 100).toFixed(1) + "%" : "-",
+      dcGap: r.dcGap,
+      count: r.count,
+    }));
+    exportToExcel({ columns: cols, data, fileName: `目标达成_${LEVEL_MAP[level].label}` });
+  };
+
   const controls = (
     <div className="flex items-center gap-2 flex-wrap">
+      <ExportButton onClick={handleExport} />
       <div className="flex items-center gap-1">
         {LEVELS.map((l) => (
           <button

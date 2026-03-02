@@ -1,5 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useState } from "react";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 function fmt(v: number): string {
   if (v === 0) return "0";
@@ -12,8 +14,46 @@ export default function TrackingView({ data }: { data: any }) {
 
   if (!data || !data.groups) return <div className="text-muted-foreground text-center py-8">暂无追踪数据</div>;
 
+  const handleExport = () => {
+    const columns: ExportColumn[] = [
+      { header: "营业部", key: "deptName", width: 14 },
+      { header: "姓名", key: "name", width: 10 },
+      { header: "期交保费", key: "qjbf", type: "number", width: 14 },
+      { header: "非邮期交", key: "feiyouQj", type: "number", width: 14 },
+      { header: "规保", key: "guibao", type: "number", width: 14 },
+      { header: "价值趸", key: "jzdc", type: "number", width: 14 },
+      { header: "规模趸", key: "gmdc", type: "number", width: 14 },
+      { header: "标保", key: "bb", type: "number", width: 14 },
+      { header: "件数", key: "js", type: "number", width: 10 },
+      { header: "网点总数", key: "wdTotal", type: "number", width: 10 },
+      { header: "活动网点", key: "activeWd", type: "number", width: 10 },
+    ];
+    const rows: any[] = [];
+    for (const group of data.groups) {
+      for (const m of group.members) {
+        rows.push({
+          deptName: group.deptName,
+          name: m.name,
+          qjbf: m.qjbf,
+          feiyouQj: m.feiyouQj,
+          guibao: m.guibao,
+          jzdc: m.jzdc,
+          gmdc: m.gmdc,
+          bb: m.bb,
+          js: m.js,
+          wdTotal: m.wdTotal,
+          activeWd: m.activeWd,
+        });
+      }
+    }
+    exportToExcel(columns, rows, "追踪报表");
+  };
+
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-end">
+        <ExportButton onClick={handleExport} />
+      </div>
       {data.groups.map((group: any) => (
         <Card key={group.deptName}>
           <CardHeader

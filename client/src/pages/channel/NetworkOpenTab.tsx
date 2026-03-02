@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import { thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function NetworkOpenTab() {
   const { reportData } = useReport();
@@ -23,11 +25,35 @@ export default function NetworkOpenTab() {
     );
   }
 
+  const handleExport = () => {
+    if (!networkData || networkData.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "银行渠道", key: "bank", width: 18 },
+      { header: "类型", key: "type", width: 10 },
+      ...deptManagerOrder.map((d: string) => ({ header: d, key: d, type: "number" as const, width: 10 })),
+      { header: "渠道合计", key: "channelTotal", type: "number", width: 12 },
+    ];
+    const exportData: any[] = [];
+    for (const row of networkData) {
+      const totalRow: any = { bank: row.bank, type: "总网点", channelTotal: row.totalNet };
+      const activeRow: any = { bank: row.bank, type: "开单网点", channelTotal: row.activeNet };
+      for (const dept of deptManagerOrder) {
+        totalRow[dept] = row.depts[dept]?.total || 0;
+        activeRow[dept] = row.depts[dept]?.active || 0;
+      }
+      exportData.push(totalRow, activeRow);
+    }
+    exportToExcel({ columns, data: exportData, fileName: "网点数据_开单网点" });
+  };
+
   return (
     <div className="p-4 space-y-3">
-      <p className="text-xs text-muted-foreground">
-        各银行渠道在各营业部的网点数和开单网点数（每个渠道两行：总网点 / 开单网点）
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          各银行渠道在各营业部的网点数和开单网点数（每个渠道两行：总网点 / 开单网点）
+        </p>
+        <ExportButton onClick={handleExport} />
+      </div>
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">网点数据—开单网点</CardTitle>

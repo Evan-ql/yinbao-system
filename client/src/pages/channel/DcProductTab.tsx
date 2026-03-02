@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import { fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function DcProductTab() {
   const { reportData } = useReport();
@@ -27,11 +29,28 @@ export default function DcProductTab() {
     );
   }
 
+  const handleExport = () => {
+    if (!dcProducts || dcProducts.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "产品名称", key: "name", width: 20 },
+      { header: "月度保费", key: "value", type: "number", width: 14 },
+      { header: "占比", key: "ratioStr", width: 10 },
+    ];
+    const exportData = dcProducts.map((p: any) => ({
+      ...p,
+      ratioStr: dcProductTotal > 0 ? (p.value / dcProductTotal * 100).toFixed(1) + "%" : "0%",
+    }));
+    exportToExcel({ columns, data: exportData, fileName: "趸交产品数据" });
+  };
+
   return (
     <div className="p-4 space-y-3">
-      <p className="text-xs text-muted-foreground">
-        趸交产品月度保费数据
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          趸交产品月度保费数据
+        </p>
+        <ExportButton onClick={handleExport} />
+      </div>
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">趸交产品数据</CardTitle>

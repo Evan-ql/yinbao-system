@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import { fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 const MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
@@ -21,13 +23,30 @@ export default function MonthlyTrendTab() {
   const totals = mode === "qj" ? monthlyTrendTotals : (monthlyTrendDcTotals || {});
   const grandTotal = mode === "qj" ? monthlyGrandTotal : (monthlyGrandTotalDc || 0);
 
+  const handleExport = () => {
+    if (!rows || rows.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "银行渠道", key: "name", width: 18 },
+      ...MONTHS.map(m => ({ header: `${m}月`, key: `m${m}`, type: "number" as const, width: 10 })),
+      { header: "合计", key: "total", type: "number", width: 14 },
+    ];
+    const exportData = rows.map((row: any) => {
+      const r: any = { name: row.name, total: row.total };
+      MONTHS.forEach(m => { r[`m${m}`] = row.months[m] || 0; });
+      return r;
+    });
+    exportToExcel({ columns, data: exportData, fileName: `月度趋势_${mode === "qj" ? "年交" : "趸交"}` });
+  };
+
   return (
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
           各银行渠道按月份的{mode === "qj" ? "年交" : "趸交"}保费趋势
         </p>
-        <div className="inline-flex rounded-lg border border-border overflow-hidden text-xs">
+        <div className="flex items-center gap-2">
+          <ExportButton onClick={handleExport} />
+          <div className="inline-flex rounded-lg border border-border overflow-hidden text-xs">
           <button
             className={`px-3 py-1.5 transition-colors ${
               mode === "qj"
@@ -48,6 +67,7 @@ export default function MonthlyTrendTab() {
           >
             趸交
           </button>
+        </div>
         </div>
       </div>
       <Card>

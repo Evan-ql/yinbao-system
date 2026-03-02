@@ -2,6 +2,8 @@ import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import { fmt, pct, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function NetworkPerfTab() {
   const { reportData } = useReport();
@@ -51,6 +53,35 @@ export default function NetworkPerfTab() {
 
   const isQj = mode === "qj";
 
+  const handleExport = () => {
+    if (filtered.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "银行", key: "bank", width: 14 },
+      { header: "网点名称", key: "name", width: 20 },
+      { header: "简称", key: "shortName", width: 14 },
+      { header: "部门经理", key: "deptManager", width: 10 },
+      { header: "客户经理", key: "customerManager", width: 10 },
+      { header: isQj ? "期交" : "趸交", key: "premium", type: "number", width: 14 },
+      { header: "件数", key: "js", type: "number", width: 10 },
+      { header: isQj ? "期交目标" : "趸交目标", key: "target", type: "number", width: 14 },
+      { header: "完成率", key: "completionStr", width: 10 },
+    ];
+    const exportData = filtered.map((n: any) => ({
+      bank: n.bank,
+      name: n.name,
+      shortName: n.shortName || "",
+      deptManager: n.deptManager,
+      customerManager: n.customerManager,
+      premium: isQj ? n.qj : n.dc,
+      js: n.js,
+      target: isQj ? n.qjTarget : n.dcTarget,
+      completionStr: (isQj ? n.qjTarget : n.dcTarget) > 0
+        ? ((isQj ? n.qj : n.dc) / (isQj ? n.qjTarget : n.dcTarget) * 100).toFixed(1) + "%"
+        : "-",
+    }));
+    exportToExcel({ columns, data: exportData, fileName: `网点业绩_${isQj ? "期交" : "趸交"}` });
+  };
+
   return (
     <div className="p-4 space-y-3">
       {/* 筛选栏 */}
@@ -59,6 +90,7 @@ export default function NetworkPerfTab() {
           网点业绩明细（{isQj ? "期交" : "趸交"}）
         </p>
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <ExportButton onClick={handleExport} />
           {/* 银行渠道筛选 */}
           <select
             className="text-xs border border-border rounded px-2 py-1.5 bg-background"

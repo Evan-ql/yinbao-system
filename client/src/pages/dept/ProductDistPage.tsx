@@ -3,6 +3,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 interface ProductRow {
   name: string;
@@ -93,8 +95,30 @@ export default function ProductDistPage() {
 
   const pctFmt = (v: number) => (v * 100).toFixed(1) + "%";
 
+  const handleExport = () => {
+    if (!products || products.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "险种名称", key: "name", width: 20 },
+      { header: "险种代码", key: "code", width: 12 },
+      { header: "险种类别", key: "type", width: 10 },
+      { header: "交费期间", key: "interval", width: 10 },
+      { header: "保险期间", key: "period", width: 10 },
+      { header: "规模保费", key: "premium", type: "number", width: 14 },
+      { header: "保费占比", key: "premiumPctStr", width: 10 },
+      { header: "件数", key: "count", type: "number", width: 10 },
+      { header: "件数占比", key: "countPctStr", width: 10 },
+    ];
+    const data = products.map((p: any) => ({
+      ...p,
+      premiumPctStr: (p.premiumPct * 100).toFixed(1) + "%",
+      countPctStr: (p.countPct * 100).toFixed(1) + "%",
+    }));
+    exportToExcel({ columns, data, fileName: "险种分布" });
+  };
+
   return (
-    <DeptSubPageWrapper title="险种分布">
+    <DeptSubPageWrapper title="险种分布"
+      extraControls={<ExportButton onClick={handleExport} />}>
       {/* 类型汇总卡片 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         {typeSummary.map((t) => (

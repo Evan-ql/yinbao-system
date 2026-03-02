@@ -2,10 +2,27 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function NetworkDistPage() {
   const { reportData } = useReport();
   const networkDist = reportData?.dept?.networkDist;
+
+
+  const handleExport = () => {
+    if (!networkDist) return;
+    const columns: ExportColumn[] = [
+      { header: "营业部", key: "name", width: 14 },
+      ...networkDist.headers.map((h: string) => ({ header: h, key: h, type: "number" as const, width: 12 })),
+    ];
+    const data = networkDist.rows.map((r: any) => {
+      const rowData: any = { name: r.name };
+      networkDist.headers.forEach((h: string, i: number) => { rowData[h] = r.values[i] || 0; });
+      return rowData;
+    });
+    exportToExcel({ columns, data, fileName: "网点分布" });
+  };
 
   return (
     <DeptSubPageWrapper title="网点分布" description="各营业部在各银行渠道的网点数量">

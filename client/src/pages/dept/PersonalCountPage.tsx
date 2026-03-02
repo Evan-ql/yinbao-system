@@ -3,6 +3,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { thCls, tdCls, monoR, rowHover } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function PersonalCountPage() {
   const { reportData } = useReport();
@@ -12,10 +14,22 @@ export default function PersonalCountPage() {
     ? reportData?.dept?.personalCountTop
     : reportData?.dept?.personalCountTopFeiyou;
 
+  const handleExport = () => {
+    if (!personalCountTop || personalCountTop.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "排名", key: "rank", width: 8 },
+      { header: "姓名", key: "name", width: 10 },
+      { header: "件数", key: "js", type: "number", width: 10 },
+    ];
+    const data = personalCountTop.map((p: any, i: number) => ({ rank: i + 1, name: p.name, js: p.js }));
+    exportToExcel({ columns, data, fileName: `个人件数前10_${mode === "all" ? "全渠道" : "非邮"}` });
+  };
+
   return (
     <DeptSubPageWrapper
       title={`个人件数前10（${mode === "all" ? "全渠道" : "非邮"}）`}
       description={`${mode === "all" ? "全渠道" : "非邮渠道"}个人件数排名`}
+      extraControls={<ExportButton onClick={handleExport} />}
     >
       <div className="flex justify-end mb-3">
         <div className="inline-flex rounded-lg border border-border overflow-hidden text-xs">

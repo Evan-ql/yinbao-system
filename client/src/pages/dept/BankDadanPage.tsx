@@ -2,10 +2,27 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function BankDadanPage() {
   const { reportData } = useReport();
   const bankDadanList = reportData?.dept?.bankDadanList;
+
+
+  const handleExport = () => {
+    if (!bankDadanList || bankDadanList.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "渠道", key: "name", width: 18 },
+      { header: "5万", key: "c5w", type: "number", width: 10 },
+      { header: "10万", key: "c10w", type: "number", width: 10 },
+      { header: "20万", key: "c20w", type: "number", width: 10 },
+      { header: "50万", key: "c50w", type: "number", width: 10 },
+      { header: "100万", key: "c100w", type: "number", width: 10 },
+      { header: "总保费", key: "totalAbove10w", type: "number", width: 14 },
+    ];
+    exportToExcel({ columns, data: bankDadanList, fileName: "全渠道大单分布" });
+  };
 
   return (
     <DeptSubPageWrapper title="全渠道大单分布" description="按银行渠道统计大单件数">

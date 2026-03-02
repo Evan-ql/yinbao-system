@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import { fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function ChannelProductTab() {
   const { reportData } = useReport();
@@ -9,11 +11,28 @@ export default function ChannelProductTab() {
 
   const { productList, channelProductMatrix, channelProductTotals } = data;
 
+  const handleExport = () => {
+    if (!channelProductMatrix || channelProductMatrix.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "银行渠道", key: "name", width: 18 },
+      ...productList.map((p: string) => ({ header: p, key: p, type: "number" as const, width: 14 })),
+    ];
+    const exportData = channelProductMatrix.map((row: any) => {
+      const r: any = { name: row.name };
+      productList.forEach((p: string) => { r[p] = row.products[p] || 0; });
+      return r;
+    });
+    exportToExcel({ columns, data: exportData, fileName: "渠道产品分布" });
+  };
+
   return (
     <div className="p-4 space-y-3">
-      <p className="text-xs text-muted-foreground">
-        各银行渠道在每个产品上的年交保费分布
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          各银行渠道在每个产品上的年交保费分布
+        </p>
+        <ExportButton onClick={handleExport} />
+      </div>
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">渠道产品分布</CardTitle>

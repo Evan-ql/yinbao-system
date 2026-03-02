@@ -2,13 +2,30 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function DadanPage() {
   const { reportData } = useReport();
   const dadanData = reportData?.dept?.dadanData;
 
+  const handleExport = () => {
+    if (!dadanData || dadanData.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "营业部", key: "name", width: 14 },
+      { header: "5万", key: "c5w", type: "number", width: 10 },
+      { header: "10万", key: "c10w", type: "number", width: 10 },
+      { header: "20万", key: "c20w", type: "number", width: 10 },
+      { header: "50万", key: "c50w", type: "number", width: 10 },
+      { header: "100万", key: "c100w", type: "number", width: 10 },
+      { header: "10万+总保费", key: "totalAbove10w", type: "number", width: 14 },
+    ];
+    exportToExcel({ columns, data: dadanData, fileName: "部门大单分布" });
+  };
+
   return (
-    <DeptSubPageWrapper title="部门大单分布" description="各营业部大单件数分布">
+    <DeptSubPageWrapper title="部门大单分布" description="各营业部大单件数分布"
+      extraControls={<ExportButton onClick={handleExport} />}>
       <Card>
         <CardContent className="pt-4">
           <div className="overflow-x-auto">

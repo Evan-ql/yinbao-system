@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { pct, fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function HrDataPage() {
   const { reportData } = useReport();
@@ -35,8 +37,29 @@ export default function HrDataPage() {
     });
   };
 
+  const handleExport = () => {
+    const columns: ExportColumn[] = [
+      { header: "营业部", key: "dept", width: 14 },
+      { header: "姓名", key: "name", width: 10 },
+      { header: "开单状态", key: "status", width: 10 },
+      { header: "网点名称", key: "network", width: 20 },
+      { header: "银行", key: "bank", width: 14 },
+      { header: "年交保费", key: "nj", type: "number", width: 14 },
+    ];
+    const data = filteredDetails.map((d: any) => ({
+      dept: d.dept || "",
+      name: d.customerManager || "",
+      status: d.kaidan ? "已开单" : "未开单",
+      network: d.agencyName || "",
+      bank: d.bankName || "",
+      nj: d.nj || 0,
+    }));
+    exportToExcel({ columns, data, fileName: "人力数据" });
+  };
+
   return (
-    <DeptSubPageWrapper title="人力数据" description="各营业部人力与开单情况">
+    <DeptSubPageWrapper title="人力数据" description="各营业部人力与开单情况"
+      extraControls={<ExportButton onClick={handleExport} />}>
       {/* 原有营业部汇总表 */}
       <Card>
         <CardHeader className="pb-3">

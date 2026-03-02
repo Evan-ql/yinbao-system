@@ -3,6 +3,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 /**
  * 个人详情页面
@@ -156,8 +158,38 @@ export default function PersonalDetailPage() {
     setExpandedPerson((prev) => (prev === name ? null : name));
   };
 
+  const handleExport = () => {
+    if (filtered.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "客户经理", key: "name", width: 12 },
+      { header: "营业部经理", key: "deptManager", width: 12 },
+      { header: "网点", key: "networkName", width: 20 },
+      { header: "银行", key: "bankName", width: 14 },
+      ...monthList.map(m => ({ header: `${m}月`, key: `m${m}`, type: "number" as const, width: 10 })),
+      { header: "合计", key: "total", type: "number", width: 14 },
+    ];
+    const data: any[] = [];
+    for (const person of filtered) {
+      for (const net of person.networks) {
+        const row: any = {
+          name: person.name,
+          deptManager: person.deptManager,
+          networkName: net.networkName,
+          bankName: net.bankName,
+          total: net.totalPremium,
+        };
+        for (const m of monthList) {
+          row[`m${m}`] = net.months[m]?.premium || 0;
+        }
+        data.push(row);
+      }
+    }
+    exportToExcel({ columns, data, fileName: "个人详情" });
+  };
+
   const controls = (
     <div className="flex items-center gap-2 flex-wrap">
+      <ExportButton onClick={handleExport} />
       <div className="relative">
         <input
           type="text"

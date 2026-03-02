@@ -2,10 +2,23 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 export default function DailyPremiumPage() {
   const { reportData } = useReport();
   const dailyData = reportData?.dept?.dailyData;
+
+
+  const handleExport = () => {
+    if (!dailyData || dailyData.length === 0) return;
+    const columns: ExportColumn[] = [
+      { header: "日期", key: "date", width: 12 },
+      { header: "当日保费", key: "daily", type: "number", width: 14 },
+      { header: "累计保费", key: "cumulative", type: "number", width: 14 },
+    ];
+    exportToExcel({ columns, data: dailyData, fileName: "日保费数据" });
+  };
 
   return (
     <DeptSubPageWrapper title="日保费数据" description="当日各营业部实时保费数据">

@@ -1,5 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useState } from "react";
+import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import ExportButton from "@/components/ExportButton";
 
 function fmt(v: number): string {
   if (v === 0) return "0";
@@ -15,6 +17,30 @@ export default function CoreNetworkView({ data }: { data: any }) {
   const banks = Array.from(new Set(data.networks.map((n: any) => n.totalBankName || ""))).filter(Boolean) as string[];
   const filtered = filterBank === "all" ? data.networks : data.networks.filter((n: any) => n.totalBankName === filterBank);
 
+  const handleExport = () => {
+    const columns: ExportColumn[] = [
+      { header: "银行", key: "totalBankName", width: 14 },
+      { header: "网点", key: "agencyName", width: 20 },
+      { header: "客户经理", key: "customerManager", width: 10 },
+      { header: "1月", key: "m1", type: "number", width: 12 },
+      { header: "2月", key: "m2", type: "number", width: 12 },
+      { header: "3月", key: "m3", type: "number", width: 12 },
+      { header: "合计", key: "total", type: "number", width: 14 },
+      { header: "件数", key: "js", type: "number", width: 10 },
+    ];
+    const rows = filtered.map((n: any) => ({
+      totalBankName: n.totalBankName,
+      agencyName: n.agencyName,
+      customerManager: n.customerManager,
+      m1: n.months?.[1] || 0,
+      m2: n.months?.[2] || 0,
+      m3: n.months?.[3] || 0,
+      total: n.total,
+      js: n.js,
+    }));
+    exportToExcel(columns, rows, "核心网点");
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
@@ -29,6 +55,9 @@ export default function CoreNetworkView({ data }: { data: any }) {
             <option key={b} value={b}>{b}</option>
           ))}
         </select>
+        <div className="ml-auto">
+          <ExportButton onClick={handleExport} />
+        </div>
       </div>
 
       <Card>
