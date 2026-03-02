@@ -8,7 +8,7 @@ import { loadDailyList } from './dailyList';
 import { generateDeptData } from './deptSheet';
 import { generateChannelData } from './channelSheet';
 import { DataRow, safeFloat, safeStr, LookupTables } from './utils';
-import { fillMissingAttribution } from '../staffScanner';
+import { fillMissingAttribution, applyOrgOverrides, applyNetRowsOrgOverrides } from '../staffScanner';
 import { checkDataIntegrity, IntegrityAlert } from '../dataIntegrity';
 import { getSettingsData } from '../settingsApi';
 
@@ -60,6 +60,10 @@ export function processReport(
   fillMissingAttribution(dataRows, monthEnd, renwangBuffer);
   console.log('[Report] Auto-filled missing attribution from org structure');
 
+  // [v1.0.5] 根据组织架构覆盖已有的归属关系（修复调岗后报表未更新的问题）
+  applyOrgOverrides(dataRows, monthEnd);
+  console.log('[Report] Applied org structure overrides');
+
   console.log('[Report] Checking data integrity...');
   const integrityAlert = checkDataIntegrity(dataRows);
   if (integrityAlert.hasMissing) {
@@ -68,6 +72,9 @@ export function processReport(
 
   console.log('[Report] Generating network data...');
   const netRows = generateNetwork(renwangBuffer, dataRows, lookups, monthStart, monthEnd);
+
+  // [v1.0.5] 对netRows也应用组织架构覆盖（营业部经理姓名字段）
+  applyNetRowsOrgOverrides(netRows, monthEnd);
 
   console.log('[Report] Generating HR data...');
   const hrRows = generateHr(netRows, dataRows, lookups, monthStart, monthEnd);

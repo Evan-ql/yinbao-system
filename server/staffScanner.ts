@@ -534,6 +534,236 @@ export function fillMissingAttribution(dataRows: any[], month?: number, renwangB
 }
 
 /**
+ * 根据组织架构设置覆盖数据行中的归属关系
+ * 解决问题：当用户在设置中将某人从"营业部经理"调岗为"客户经理"后，
+ * 报表中该人仍以营业部经理身份显示（因为Excel原始数据中的字段没有变）。
+ * 
+ * 逻辑：
+ * 1. 从组织架构中找出所有"不再是营业部经理"的人（即角色已变为customerManager或已离职/调岗）
+ * 2. 对于这些人，找到他们当前的上级（新的营业部经理）
+ * 3. 在dataRows中，将这些人名下的保单的"营业部经理名称"替换为新的营业部经理
+ * 4. 同样处理总监字段
+ */
+export function applyOrgOverrides(dataRows: any[], month?: number): void {
+  const settings = getSettingsData();
+  const staffList: StaffRecord[] = settings.staff || [];
+  if (staffList.length === 0) return;
+
+  const targetMonth = month || 12;
+
+  // 按角色和月份获取有效记录
+  const getEffective = (name: string, role: string, targetM: number): StaffRecord | null => {
+    const records = staffList.filter(s => s.name === name && s.role === role && s.status === 'active');
+    if (records.length === 0) return null;
+    let best: StaffRecord | null = null;
+    for (const r of records) {
+      const rm = r.month || 0;
+      if (rm === 0 || rm <= targetM) {
+        if (!best || (r.month || 0) > (best.month || 0)) {
+          best = r;
+        }
+      }
+    }
+    return best || records[0];
+  };
+
+  // 1. 找出所有在组织架构中不再是营业部经理的人
+  //    即：该人在staffList中有deptManager记录，但最新有效状态不是active的deptManager
+  //    或者该人在staffList中已经变成了customerManager角色
+  const noLongerDeptManager = new Set<string>();
+  // 收集所有曾经是营业部经理的人名
+  const everDeptManager = new Set<string>();
+  for (const s of staffList) {
+    if (s.role === 'deptManager') {
+      everDeptManager.add(s.name);
+    }
+  }
+
+  for (const name of everDeptManager) {
+    // 检查该人当前是否仍然是有效的营业部经理
+    const effectiveDM = getEffective(name, 'deptManager', targetMonth);
+    // 检查该人是否已经变成了客户经理
+    const effectiveCM = getEffective(name, 'customerManager', targetMonth);
+    
+    if (!effectiveDM && effectiveCM) {
+      // 该人不再是营业部经理，已经变成客户经理
+      noLongerDeptManager.add(name);
+    } else if (effectiveDM) {
+      // 检查是否有更晚的 transferred 记录
+      const transferredRecords = staffList.filter(
+        s => s.name === name && s.role === 'deptManager' && s.status === 'transferred'
+      );
+      const latestTransferred = transferredRecords
+        .filter(r => (r.month || 0) <= targetMonth)
+        .sort((a, b) => (b.month || 0) - (a.month || 0))[0];
+      
+      if (latestTransferred && effectiveCM) {
+        // 有调岗记录且已变成客户经理
+        const latestActive = staffList
+          .filter(s => s.name === name && s.role === 'deptManager' && s.status === 'active')
+          .filter(r => (r.month || 0) <= targetMonth)
+          .sort((a, b) => (b.month || 0) - (a.month || 0))[0];
+        
+        if (latestTransferred && latestActive && 
+            (latestTransferred.month || 0) >= (latestActive.month || 0)) {
+          noLongerDeptManager.add(name);
+        }
+      }
+    }
+  }
+
+  if (noLongerDeptManager.size === 0) return;
+
+  console.log(`[StaffScanner] Org overrides: ${noLongerDeptManager.size} person(s) no longer dept manager: ${Array.from(noLongerDeptManager).join(', ')}`);
+
+  // 2. 对于不再是营业部经理的人，找到他们作为客户经理时的上级（新的营业部经理）
+  const replacementMap = new Map<string, string>(); // 旧营业部经理名 → 新营业部经理名
+  for (const name of noLongerDeptManager) {
+    const cmRecord = getEffective(name, 'customerManager', targetMonth);
+    if (cmRecord && cmRecord.parentId) {
+      replacementMap.set(name, cmRecord.parentId);
+      console.log(`[StaffScanner] Org override: ${name} → new manager: ${cmRecord.parentId}`);
+    }
+  }
+
+  if (replacementMap.size === 0) return;
+
+  // 3. 遍历dataRows，替换营业部经理名称
+  let overriddenMgr = 0;
+  let overriddenDir = 0;
+  for (const row of dataRows) {
+    const mgr = safeStr(row['营业部经理名称']);
+    if (mgr && replacementMap.has(mgr)) {
+      row['营业部经理名称'] = replacementMap.get(mgr);
+      overriddenMgr++;
+    }
+  }
+
+  // 4. 同样处理总监字段：如果某人不再是总监
+  const noLongerDirector = new Set<string>();
+  const everDirector = new Set<string>();
+  for (const s of staffList) {
+    if (s.role === 'director') {
+      everDirector.add(s.name);
+    }
+  }
+  for (const name of everDirector) {
+    const effectiveDir = getEffective(name, 'director', targetMonth);
+    const effectiveDM = getEffective(name, 'deptManager', targetMonth);
+    const effectiveCM = getEffective(name, 'customerManager', targetMonth);
+    if (!effectiveDir && (effectiveDM || effectiveCM)) {
+      noLongerDirector.add(name);
+    }
+  }
+
+  if (noLongerDirector.size > 0) {
+    const dirReplacementMap = new Map<string, string>();
+    for (const name of noLongerDirector) {
+      const dmRecord = getEffective(name, 'deptManager', targetMonth);
+      if (dmRecord && dmRecord.parentId) {
+        dirReplacementMap.set(name, dmRecord.parentId);
+      }
+    }
+    for (const row of dataRows) {
+      const dir = safeStr(row['营业区总监']);
+      if (dir && dirReplacementMap.has(dir)) {
+        row['营业区总监'] = dirReplacementMap.get(dir);
+        overriddenDir++;
+      }
+    }
+  }
+
+  if (overriddenMgr > 0 || overriddenDir > 0) {
+    console.log(`[StaffScanner] Org overrides applied: ${overriddenMgr} manager fields, ${overriddenDir} director fields overridden`);
+  }
+}
+
+/**
+ * 对网点数据（netRows）应用组织架构覆盖
+ * netRows 中的 '营业部经理姓名' 来自人网文件，同样需要根据组织架构设置进行覆盖
+ */
+export function applyNetRowsOrgOverrides(netRows: any[], month?: number): void {
+  const settings = getSettingsData();
+  const staffList: StaffRecord[] = settings.staff || [];
+  if (staffList.length === 0) return;
+
+  const targetMonth = month || 12;
+
+  const getEffective = (name: string, role: string, targetM: number): StaffRecord | null => {
+    const records = staffList.filter(s => s.name === name && s.role === role && s.status === 'active');
+    if (records.length === 0) return null;
+    let best: StaffRecord | null = null;
+    for (const r of records) {
+      const rm = r.month || 0;
+      if (rm === 0 || rm <= targetM) {
+        if (!best || (r.month || 0) > (best.month || 0)) {
+          best = r;
+        }
+      }
+    }
+    return best || records[0];
+  };
+
+  // 找出不再是营业部经理的人
+  const noLongerDeptManager = new Set<string>();
+  const everDeptManager = new Set<string>();
+  for (const s of staffList) {
+    if (s.role === 'deptManager') everDeptManager.add(s.name);
+  }
+  for (const name of everDeptManager) {
+    const effectiveDM = getEffective(name, 'deptManager', targetMonth);
+    const effectiveCM = getEffective(name, 'customerManager', targetMonth);
+    if (!effectiveDM && effectiveCM) {
+      noLongerDeptManager.add(name);
+    } else if (effectiveDM) {
+      const transferredRecords = staffList.filter(
+        s => s.name === name && s.role === 'deptManager' && s.status === 'transferred'
+      );
+      const latestTransferred = transferredRecords
+        .filter(r => (r.month || 0) <= targetMonth)
+        .sort((a, b) => (b.month || 0) - (a.month || 0))[0];
+      if (latestTransferred && effectiveCM) {
+        const latestActive = staffList
+          .filter(s => s.name === name && s.role === 'deptManager' && s.status === 'active')
+          .filter(r => (r.month || 0) <= targetMonth)
+          .sort((a, b) => (b.month || 0) - (a.month || 0))[0];
+        if (latestTransferred && latestActive && 
+            (latestTransferred.month || 0) >= (latestActive.month || 0)) {
+          noLongerDeptManager.add(name);
+        }
+      }
+    }
+  }
+
+  if (noLongerDeptManager.size === 0) return;
+
+  // 构建替换映射
+  const replacementMap = new Map<string, string>();
+  for (const name of noLongerDeptManager) {
+    const cmRecord = getEffective(name, 'customerManager', targetMonth);
+    if (cmRecord && cmRecord.parentId) {
+      replacementMap.set(name, cmRecord.parentId);
+    }
+  }
+
+  if (replacementMap.size === 0) return;
+
+  // 替换 netRows 中的营业部经理姓名
+  let overridden = 0;
+  for (const row of netRows) {
+    const mgr = safeStr(row['营业部经理姓名']);
+    if (mgr && replacementMap.has(mgr)) {
+      row['营业部经理姓名'] = replacementMap.get(mgr);
+      overridden++;
+    }
+  }
+
+  if (overridden > 0) {
+    console.log(`[StaffScanner] NetRows org overrides: ${overridden} manager fields overridden`);
+  }
+}
+
+/**
  * 岗位轨迹：从2026数据源中按月提取指定人员的岗位信息
  * 返回该人员在每个月的角色、上级、保单数等信息
  */
