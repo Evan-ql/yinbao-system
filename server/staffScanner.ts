@@ -586,7 +586,13 @@ export function applyOrgOverrides(dataRows: any[], month?: number): void {
     const effectiveCM = getEffective(name, 'customerManager', targetMonth);
     
     if (!effectiveDM && effectiveCM) {
-      // 该人不再是营业部经理，已经变成客户经理
+      // 该人不再是营业部经理（无active的deptManager记录），已经变成客户经理
+      noLongerDeptManager.add(name);
+    } else if (effectiveDM && effectiveCM) {
+      // 关键修复：该人同时有 active 的营业部经理和客户经理记录
+      // 这说明用户在设置中给该人新增了客户经理角色，意味着调岗
+      // 以客户经理为准，将其从营业部经理中移除
+      console.log(`[StaffScanner] ${name} has both active deptManager and customerManager records, treating as customerManager`);
       noLongerDeptManager.add(name);
     } else if (effectiveDM) {
       // 检查是否有更晚的 transferred 记录
@@ -597,14 +603,14 @@ export function applyOrgOverrides(dataRows: any[], month?: number): void {
         .filter(r => (r.month || 0) <= targetMonth)
         .sort((a, b) => (b.month || 0) - (a.month || 0))[0];
       
-      if (latestTransferred && effectiveCM) {
-        // 有调岗记录且已变成客户经理
+      if (latestTransferred) {
+        // 有调岗记录
         const latestActive = staffList
           .filter(s => s.name === name && s.role === 'deptManager' && s.status === 'active')
           .filter(r => (r.month || 0) <= targetMonth)
           .sort((a, b) => (b.month || 0) - (a.month || 0))[0];
         
-        if (latestTransferred && latestActive && 
+        if (latestActive && 
             (latestTransferred.month || 0) >= (latestActive.month || 0)) {
           noLongerDeptManager.add(name);
         }
@@ -715,6 +721,9 @@ export function applyNetRowsOrgOverrides(netRows: any[], month?: number): void {
     const effectiveCM = getEffective(name, 'customerManager', targetMonth);
     if (!effectiveDM && effectiveCM) {
       noLongerDeptManager.add(name);
+    } else if (effectiveDM && effectiveCM) {
+      // 同时有 active 的营业部经理和客户经理记录，以客户经理为准
+      noLongerDeptManager.add(name);
     } else if (effectiveDM) {
       const transferredRecords = staffList.filter(
         s => s.name === name && s.role === 'deptManager' && s.status === 'transferred'
@@ -722,12 +731,12 @@ export function applyNetRowsOrgOverrides(netRows: any[], month?: number): void {
       const latestTransferred = transferredRecords
         .filter(r => (r.month || 0) <= targetMonth)
         .sort((a, b) => (b.month || 0) - (a.month || 0))[0];
-      if (latestTransferred && effectiveCM) {
+      if (latestTransferred) {
         const latestActive = staffList
           .filter(s => s.name === name && s.role === 'deptManager' && s.status === 'active')
           .filter(r => (r.month || 0) <= targetMonth)
           .sort((a, b) => (b.month || 0) - (a.month || 0))[0];
-        if (latestTransferred && latestActive && 
+        if (latestActive && 
             (latestTransferred.month || 0) >= (latestActive.month || 0)) {
           noLongerDeptManager.add(name);
         }
