@@ -586,13 +586,7 @@ export function applyOrgOverrides(dataRows: any[], month?: number): void {
     const effectiveCM = getEffective(name, 'customerManager', targetMonth);
     
     if (!effectiveDM && effectiveCM) {
-      // 该人不再是营业部经理（无active的deptManager记录），已经变成客户经理
-      noLongerDeptManager.add(name);
-    } else if (effectiveDM && effectiveCM) {
-      // 关键修复：该人同时有 active 的营业部经理和客户经理记录
-      // 这说明用户在设置中给该人新增了客户经理角色，意味着调岗
-      // 以客户经理为准，将其从营业部经理中移除
-      console.log(`[StaffScanner] ${name} has both active deptManager and customerManager records, treating as customerManager`);
+      // 该人不再是营业部经理，已经变成客户经理
       noLongerDeptManager.add(name);
     } else if (effectiveDM) {
       // 检查是否有更晚的 transferred 记录
@@ -603,14 +597,14 @@ export function applyOrgOverrides(dataRows: any[], month?: number): void {
         .filter(r => (r.month || 0) <= targetMonth)
         .sort((a, b) => (b.month || 0) - (a.month || 0))[0];
       
-      if (latestTransferred) {
-        // 有调岗记录
+      if (latestTransferred && effectiveCM) {
+        // 有调岗记录且已变成客户经理
         const latestActive = staffList
           .filter(s => s.name === name && s.role === 'deptManager' && s.status === 'active')
           .filter(r => (r.month || 0) <= targetMonth)
           .sort((a, b) => (b.month || 0) - (a.month || 0))[0];
         
-        if (latestActive && 
+        if (latestTransferred && latestActive && 
             (latestTransferred.month || 0) >= (latestActive.month || 0)) {
           noLongerDeptManager.add(name);
         }
@@ -618,9 +612,9 @@ export function applyOrgOverrides(dataRows: any[], month?: number): void {
     }
   }
 
-  if (noLongerDeptManager.size > 0) {
-    console.log(`[StaffScanner] Org overrides: ${noLongerDeptManager.size} person(s) no longer dept manager: ${Array.from(noLongerDeptManager).join(', ')}`);
-  }
+  if (noLongerDeptManager.size === 0) return;
+
+  console.log(`[StaffScanner] Org overrides: ${noLongerDeptManager.size} person(s) no longer dept manager: ${Array.from(noLongerDeptManager).join(', ')}`);
 
   // 2. 对于不再是营业部经理的人，找到他们作为客户经理时的上级（新的营业部经理）
   const replacementMap = new Map<string, string>(); // 旧营业部经理名 → 新营业部经理名
@@ -632,37 +626,16 @@ export function applyOrgOverrides(dataRows: any[], month?: number): void {
     }
   }
 
-  // 3. 核心修复：根据组织架构中客户经理的最新上级关系，覆盖数据行中的营业部经理名称
-  //    场景：客户经理换上级（如刘慧敏从董艳艳换到何同喜）
-  //    Excel原始数据中的营业部经理名称仍然是旧的，需要根据组织架构修正
-  const cmToNewManager = new Map<string, string>(); // 客户经理名 → 组织架构中的当前上级
-  for (const s of staffList) {
-    if (s.role === 'customerManager' && s.status === 'active' && s.parentId) {
-      const effective = getEffective(s.name, 'customerManager', targetMonth);
-      if (effective && effective.parentId) {
-        cmToNewManager.set(s.name, effective.parentId);
-      }
-    }
-  }
+  if (replacementMap.size === 0) return;
 
+  // 3. 遍历dataRows，替换营业部经理名称
   let overriddenMgr = 0;
   let overriddenDir = 0;
   for (const row of dataRows) {
-    const cm = safeStr(row['业绩归属客户经理姓名']);
     const mgr = safeStr(row['营业部经理名称']);
-    
-    // 情况A：营业部经理已调岗，替换为新的营业部经理
     if (mgr && replacementMap.has(mgr)) {
       row['营业部经理名称'] = replacementMap.get(mgr);
       overriddenMgr++;
-    }
-    // 情况B：客户经理换上级，根据组织架构中的最新上级覆盖
-    else if (cm && cmToNewManager.has(cm)) {
-      const newMgr = cmToNewManager.get(cm)!;
-      if (mgr !== newMgr) {
-        row['营业部经理名称'] = newMgr;
-        overriddenMgr++;
-      }
     }
   }
 
@@ -695,29 +668,6 @@ export function applyOrgOverrides(dataRows: any[], month?: number): void {
       const dir = safeStr(row['营业区总监']);
       if (dir && dirReplacementMap.has(dir)) {
         row['营业区总监'] = dirReplacementMap.get(dir);
-        overriddenDir++;
-      }
-    }
-  }
-
-  // 5. 根据营业部经理的最新上级关系，覆盖总监字段
-  //    场景：客户经理换了上级营业部经理，新的营业部经理可能属于不同的总监
-  const mgrToDirector = new Map<string, string>();
-  for (const s of staffList) {
-    if (s.role === 'deptManager' && s.status === 'active' && s.parentId) {
-      const effective = getEffective(s.name, 'deptManager', targetMonth);
-      if (effective && effective.parentId) {
-        mgrToDirector.set(s.name, effective.parentId);
-      }
-    }
-  }
-  for (const row of dataRows) {
-    const mgr = safeStr(row['营业部经理名称']);
-    const dir = safeStr(row['营业区总监']);
-    if (mgr && mgrToDirector.has(mgr)) {
-      const newDir = mgrToDirector.get(mgr)!;
-      if (dir !== newDir) {
-        row['营业区总监'] = newDir;
         overriddenDir++;
       }
     }
@@ -765,9 +715,6 @@ export function applyNetRowsOrgOverrides(netRows: any[], month?: number): void {
     const effectiveCM = getEffective(name, 'customerManager', targetMonth);
     if (!effectiveDM && effectiveCM) {
       noLongerDeptManager.add(name);
-    } else if (effectiveDM && effectiveCM) {
-      // 同时有 active 的营业部经理和客户经理记录，以客户经理为准
-      noLongerDeptManager.add(name);
     } else if (effectiveDM) {
       const transferredRecords = staffList.filter(
         s => s.name === name && s.role === 'deptManager' && s.status === 'transferred'
@@ -775,12 +722,12 @@ export function applyNetRowsOrgOverrides(netRows: any[], month?: number): void {
       const latestTransferred = transferredRecords
         .filter(r => (r.month || 0) <= targetMonth)
         .sort((a, b) => (b.month || 0) - (a.month || 0))[0];
-      if (latestTransferred) {
+      if (latestTransferred && effectiveCM) {
         const latestActive = staffList
           .filter(s => s.name === name && s.role === 'deptManager' && s.status === 'active')
           .filter(r => (r.month || 0) <= targetMonth)
           .sort((a, b) => (b.month || 0) - (a.month || 0))[0];
-        if (latestActive && 
+        if (latestTransferred && latestActive && 
             (latestTransferred.month || 0) >= (latestActive.month || 0)) {
           noLongerDeptManager.add(name);
         }
@@ -788,7 +735,9 @@ export function applyNetRowsOrgOverrides(netRows: any[], month?: number): void {
     }
   }
 
-  // 构建替换映射（营业部经理调岗）
+  if (noLongerDeptManager.size === 0) return;
+
+  // 构建替换映射
   const replacementMap = new Map<string, string>();
   for (const name of noLongerDeptManager) {
     const cmRecord = getEffective(name, 'customerManager', targetMonth);
@@ -797,35 +746,15 @@ export function applyNetRowsOrgOverrides(netRows: any[], month?: number): void {
     }
   }
 
-  // 构建客户经理→最新上级映射（客户经理换上级）
-  const cmToNewManager = new Map<string, string>();
-  for (const s of staffList) {
-    if (s.role === 'customerManager' && s.status === 'active' && s.parentId) {
-      const effective = getEffective(s.name, 'customerManager', targetMonth);
-      if (effective && effective.parentId) {
-        cmToNewManager.set(s.name, effective.parentId);
-      }
-    }
-  }
+  if (replacementMap.size === 0) return;
 
   // 替换 netRows 中的营业部经理姓名
   let overridden = 0;
   for (const row of netRows) {
     const mgr = safeStr(row['营业部经理姓名']);
-    const cm = safeStr(row['客户经理姓名']) || safeStr(row['业绩归属客户经理姓名']);
-    
-    // 情况A：营业部经理已调岗
     if (mgr && replacementMap.has(mgr)) {
       row['营业部经理姓名'] = replacementMap.get(mgr);
       overridden++;
-    }
-    // 情况B：客户经理换上级
-    else if (cm && cmToNewManager.has(cm)) {
-      const newMgr = cmToNewManager.get(cm)!;
-      if (mgr !== newMgr) {
-        row['营业部经理姓名'] = newMgr;
-        overridden++;
-      }
     }
   }
 
