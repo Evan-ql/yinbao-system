@@ -3,7 +3,7 @@
  * 使用 xlsx 库生成带样式的 Excel 文件并下载
  * v1.1.0
  */
-import XLSX from "xlsx";
+import * as XLSX from "xlsx";
 
 /** 列定义 */
 export interface ExportColumn {
