@@ -13,6 +13,7 @@ import PersonalCountPage from "./dept/PersonalCountPage";
 import BankDadanPage from "./dept/BankDadanPage";
 import NetworkDistPage from "./dept/NetworkDistPage";
 import ProductDistPage from "./dept/ProductDistPage";
+import PersonalDetailPage from "./dept/PersonalDetailPage";
 
 const tabs = [
   { key: "target-achievement", label: "目标达成" },
@@ -27,6 +28,7 @@ const tabs = [
   { key: "bank-dadan", label: "全渠道大单" },
   { key: "network-dist", label: "网点分布" },
   { key: "product-dist", label: "险种分布" },
+  { key: "personal-detail", label: "个人详情" },
 ] as const;
 
 type TabKey = (typeof tabs)[number]["key"];
@@ -44,6 +46,7 @@ const tabComponents: Record<TabKey, React.ComponentType> = {
   "bank-dadan": BankDadanPage,
   "network-dist": NetworkDistPage,
   "product-dist": ProductDistPage,
+  "personal-detail": PersonalDetailPage,
 };
 
 export default function DeptPage() {
