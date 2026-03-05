@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import {
   AlertTriangle, CheckCircle2, XCircle, Users, X,
   Building2, UserX, UserPlus, ChevronDown, ChevronUp,
-  Search, CheckCheck,
+  Search, CheckCheck, ArrowRightLeft, UserMinus,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -41,9 +41,12 @@ export interface DiffResult {
   totalItems: number;
   consistentCount: number;
   conflictCount: number;
+  transferredCount: number;
   missingCount: number;
   newCount: number;
+  resignedCount: number;
   inactiveCount: number;
+  latestMonth?: number;
   items: DiffItem[];
   existingStaff?: {
     directors: string[];
@@ -58,8 +61,10 @@ interface Props {
 }
 
 const TYPE_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; textColor: string; Icon: any }> = {
-  conflict:       { label: "冲突",     color: "text-red-700",    bg: "bg-red-50",    border: "border-red-200",    textColor: "#b91c1c", Icon: XCircle },
-  missing_parent: { label: "缺失归属", color: "text-orange-700", bg: "bg-orange-50", border: "border-orange-200", textColor: "#c2410c", Icon: AlertTriangle },
+  resigned:       { label: "疑似离职", color: "text-red-700",    bg: "bg-red-50",    border: "border-red-200",    textColor: "#b91c1c", Icon: UserMinus },
+  transferred:    { label: "调岗",     color: "text-purple-700", bg: "bg-purple-50", border: "border-purple-200", textColor: "#7c3aed", Icon: ArrowRightLeft },
+  conflict:       { label: "冲突",     color: "text-orange-700", bg: "bg-orange-50", border: "border-orange-200", textColor: "#c2410c", Icon: XCircle },
+  missing_parent: { label: "缺失归属", color: "text-amber-700",  bg: "bg-amber-50",  border: "border-amber-200",  textColor: "#b45309", Icon: AlertTriangle },
   new_person:     { label: "新增人员", color: "text-blue-700",   bg: "bg-blue-50",   border: "border-blue-200",   textColor: "#1d4ed8", Icon: UserPlus },
   renwang_only:   { label: "仅人网",   color: "text-cyan-700",   bg: "bg-cyan-50",   border: "border-cyan-200",   textColor: "#0e7490", Icon: Users },
   inactive:       { label: "未出现",   color: "text-gray-600",   bg: "bg-gray-50",   border: "border-gray-200",   textColor: "#4b5563", Icon: UserX },
@@ -74,29 +79,24 @@ function formatPremium(val: number): string {
 }
 
 export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Props) {
-  // 所有人员（包括总监）都参与确认流程
   const [items, setItems] = useState<DiffItem[]>(() =>
     diffResult.items
       .map(it => ({
         ...it,
-        // 总监不需要上级，自动设为空字符串（表示已确认，无需指定上级）
         confirmedParent: it.role === "director"
           ? (it.confirmedParent || "")
           : (it.confirmedParent || it.suggestedParent),
       }))
   );
 
-  // 根据角色构建上级候选列表（优先使用后端返回的组织架构数据，再从diff项中补充）
+  // 根据角色构建上级候选列表
   const parentOptions = useMemo(() => {
-    // 从后端返回的组织架构中获取已有人员
     const directors: string[] = [...(diffResult.existingStaff?.directors || [])];
     const deptManagers: string[] = [...(diffResult.existingStaff?.deptManagers || [])];
-    // 从所有diff项中补充（新增的人员可能还不在组织架构中）
     for (const it of diffResult.items) {
       if (it.role === "director" && !directors.includes(it.name)) directors.push(it.name);
       if (it.role === "deptManager" && !deptManagers.includes(it.name)) deptManagers.push(it.name);
     }
-    // 也从系统现有数据中补充
     for (const it of diffResult.items) {
       if (it.system?.role === "director" && !directors.includes(it.system.name)) directors.push(it.system.name);
       if (it.system?.role === "deptManager" && !deptManagers.includes(it.system.name)) deptManagers.push(it.system.name);
@@ -106,15 +106,15 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
     return { directors, deptManagers };
   }, [diffResult.items, diffResult.existingStaff]);
 
-  // 根据角色获取对应的上级候选列表
   const getParentOptionsForRole = (role: string): string[] => {
     switch (role) {
-      case "director": return []; // 总监没有上级可选
-      case "deptManager": return parentOptions.directors; // 营业部经理选总监
-      case "customerManager": return parentOptions.deptManagers; // 客户经理选营业部经理
+      case "director": return [];
+      case "deptManager": return parentOptions.directors;
+      case "customerManager": return parentOptions.deptManagers;
       default: return [];
     }
   };
+
   const [submitting, setSubmitting] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<string>("all");
@@ -131,12 +131,9 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
         (it.confirmedParent || it.suggestedParent || "").toLowerCase().includes(q)
       );
     }
-    // 排序：1.总监排最前 2.待指定的排前面 3.按角色排序：总监 > 营业部经理 > 客户经理
     return [...list].sort((a, b) => {
-      // 总监始终排在最前面
       if (a.role === "director" && b.role !== "director") return -1;
       if (a.role !== "director" && b.role === "director") return 1;
-      // 非总监：待指定的排前面
       const aUnresolved = a.role !== "director" && a.action !== "reject" && !a.confirmedParent && !a.suggestedParent ? 0 : 1;
       const bUnresolved = b.role !== "director" && b.action !== "reject" && !b.confirmedParent && !b.suggestedParent ? 0 : 1;
       if (aUnresolved !== bUnresolved) return aUnresolved - bUnresolved;
@@ -148,10 +145,43 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
     setItems(prev => prev.map(it => it.id === id ? { ...it, ...updates } : it));
   };
 
+  // 批量操作：将所有疑似离职标记为离职
+  const handleBatchResign = () => {
+    setItems(prev => prev.map(it =>
+      it.diffType === "resigned" ? { ...it, action: "modify" } : it
+    ));
+    toast.success("已将所有疑似离职人员标记为【确认离职】");
+  };
+
+  // 批量操作：将所有调岗确认
+  const handleBatchTransfer = () => {
+    setItems(prev => prev.map(it =>
+      it.diffType === "transferred" ? { ...it, action: "accept" } : it
+    ));
+    toast.success("已确认所有调岗变动");
+  };
+
+  // 检查是否有未处理的冲突项
+  const unresolvedConflicts = useMemo(() => {
+    return items.filter(it =>
+      it.diffType === "conflict" && it.action !== "reject" && !it.confirmedParent
+    );
+  }, [items]);
+
   const handleConfirmAll = async () => {
-    // 检查是否有"待指定"的项（总监不需要指定上级，排除在外）
+    // 检查冲突是否已解决
+    if (unresolvedConflicts.length > 0) {
+      toast.error(`还有 ${unresolvedConflicts.length} 项冲突未解决，请先处理所有冲突后再提交`);
+      setFilterType("conflict");
+      return;
+    }
+
     const unresolved = items.filter(it =>
-      it.role !== "director" && it.action !== "reject" && !it.confirmedParent && !it.suggestedParent
+      it.role !== "director" &&
+      it.action !== "reject" &&
+      it.diffType !== "resigned" &&
+      it.diffType !== "inactive" &&
+      !it.confirmedParent && !it.suggestedParent
     );
     if (unresolved.length > 0) {
       toast.warning(`还有 ${unresolved.length} 人的上级未指定，请先处理或忽略`);
@@ -186,12 +216,26 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
   }, [items]);
 
   const rejectedCount = items.filter(i => i.action === "reject").length;
+  const resignedActionCount = items.filter(i => i.diffType === "resigned" && i.action === "modify").length;
   const unresolvedCount = items.filter(i =>
-    i.role !== "director" && i.action !== "reject" && !i.confirmedParent && !i.suggestedParent
+    i.role !== "director" &&
+    i.action !== "reject" &&
+    i.diffType !== "resigned" &&
+    i.diffType !== "inactive" &&
+    !i.confirmedParent && !i.suggestedParent
   ).length;
-
-  // 统计总监数量
   const directorCount = items.filter(i => i.role === "director").length;
+
+  // 构建筛选按钮配置
+  const filterButtons = [
+    { key: "resigned",       count: typeCounts["resigned"] || 0 },
+    { key: "transferred",    count: typeCounts["transferred"] || 0 },
+    { key: "conflict",       count: typeCounts["conflict"] || 0 },
+    { key: "missing_parent", count: typeCounts["missing_parent"] || 0 },
+    { key: "new_person",     count: typeCounts["new_person"] || 0 },
+    { key: "renwang_only",   count: typeCounts["renwang_only"] || 0 },
+    { key: "inactive",       count: typeCounts["inactive"] || 0 },
+  ].filter(b => b.count > 0); // 只显示有数据的类型
 
   return (
     <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
@@ -205,7 +249,20 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
             <div>
               <h3 className="font-bold text-lg">人事结构变化确认</h3>
               <p className="text-xs text-amber-700 mt-0.5">
-                检测到 <strong>{items.length}</strong> 项人事变动（含 {directorCount} 名总监），请逐项确认后提交更新
+                检测到 <strong>{items.length}</strong> 项人事变动，请逐项确认后提交更新
+                {diffResult.latestMonth && (
+                  <span className="ml-2 text-blue-600">(数据截止{diffResult.latestMonth}月)</span>
+                )}
+                {(typeCounts["resigned"] || 0) > 0 && (
+                  <span className="ml-2 text-red-600 font-medium">
+                    （{typeCounts["resigned"]}人疑似离职）
+                  </span>
+                )}
+                {(typeCounts["transferred"] || 0) > 0 && (
+                  <span className="ml-2 text-purple-600 font-medium">
+                    （{typeCounts["transferred"]}人疑似调岗）
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -216,14 +273,8 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
 
         {/* Summary cards */}
         <div className="px-6 py-3 border-b bg-gray-50 shrink-0">
-          <div className="grid grid-cols-5 gap-3">
-            {[
-              { key: "conflict",       count: diffResult.conflictCount },
-              { key: "missing_parent", count: diffResult.missingCount },
-              { key: "new_person",     count: diffResult.newCount },
-              { key: "renwang_only",   count: typeCounts["renwang_only"] || 0 },
-              { key: "inactive",       count: diffResult.inactiveCount },
-            ].map(({ key, count }) => {
+          <div className={`grid gap-3`} style={{ gridTemplateColumns: `repeat(${Math.min(filterButtons.length, 7)}, 1fr)` }}>
+            {filterButtons.map(({ key, count }) => {
               const cfg = TYPE_CONFIG[key];
               return (
                 <button
@@ -245,9 +296,33 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
               );
             })}
           </div>
+
+          {/* 批量操作按钮 */}
+          {((typeCounts["resigned"] || 0) > 0 || (typeCounts["transferred"] || 0) > 0) && (
+            <div className="flex gap-2 mt-3">
+              {(typeCounts["resigned"] || 0) > 0 && (
+                <button
+                  onClick={handleBatchResign}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition-colors flex items-center gap-1.5"
+                >
+                  <UserMinus className="w-3.5 h-3.5" />
+                  一键确认全部离职（{typeCounts["resigned"]}人）
+                </button>
+              )}
+              {(typeCounts["transferred"] || 0) > 0 && (
+                <button
+                  onClick={handleBatchTransfer}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors flex items-center gap-1.5"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  一键确认全部调岗（{typeCounts["transferred"]}人）
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Search + filter bar */}
+        {/* Search bar */}
         <div className="px-6 py-2.5 border-b bg-white flex items-center gap-3 shrink-0">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -279,8 +354,12 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
             const isExpanded = expandedId === item.id;
             const IconComp = cfg.Icon;
             const isDirector = item.role === "director";
+            const isResigned = item.diffType === "resigned";
+            const isTransferred = item.diffType === "transferred";
+            const isInactive = item.diffType === "inactive";
             const parentDisplay = item.confirmedParent || item.suggestedParent || "";
-            const isUnresolved = !isDirector && item.action !== "reject" && !parentDisplay;
+            const isUnresolved = !isDirector && !isResigned && !isInactive &&
+              item.action !== "reject" && !parentDisplay;
 
             return (
               <div
@@ -289,6 +368,8 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
                 className={`border rounded-lg overflow-hidden transition-all ${
                   item.action === "reject" ? "opacity-40" : ""
                 } ${isUnresolved ? "border-orange-400 ring-2 ring-orange-300 bg-orange-50/30" : ""} ${
+                  isResigned ? `${cfg.border} ${item.action === "modify" ? "bg-red-50/40" : ""}` :
+                  isTransferred ? `${cfg.border} bg-purple-50/20` :
                   isDirector ? "border-purple-300 bg-purple-50/20" : cfg.border
                 }`}
               >
@@ -299,9 +380,11 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
                   }`}
                   onClick={() => setExpandedId(isExpanded ? null : item.id)}
                 >
-                  <IconComp className={`w-4 h-4 shrink-0 ${isDirector ? "text-purple-600" : cfg.color}`} />
+                  <IconComp className={`w-4 h-4 shrink-0 ${cfg.color}`} />
                   <div className="flex-1 min-w-0 flex items-center gap-2">
-                    <span className="text-sm font-semibold whitespace-nowrap">{item.name}</span>
+                    <span className={`text-sm font-semibold whitespace-nowrap ${
+                      isResigned && item.action === "modify" ? "line-through text-gray-400" : ""
+                    }`}>{item.name}</span>
                     <span className="text-[10px] text-gray-400 whitespace-nowrap">{item.code}</span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${
                       item.role === "director" ? "bg-purple-100 text-purple-700" :
@@ -310,10 +393,46 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
                     }`}>
                       {item.roleLabel}
                     </span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${cfg.bg} ${cfg.color} whitespace-nowrap`}>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${cfg.bg} ${cfg.color} font-medium whitespace-nowrap`}>
                       {cfg.label}
                     </span>
-                    {item.system && (
+                    {/* 显示关键信息 */}
+                    {isResigned && item.system && (
+                      <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                        原上级：{item.system.parent || "无"}
+                      </span>
+                    )}
+                    {isResigned && !item.system && item.source && (
+                      <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                        原上级：{item.source.parent || "无"}
+                      </span>
+                    )}
+                    {isResigned && item.source?.months?.length ? (
+                      <span className="text-[10px] text-red-400 whitespace-nowrap">
+                        出单：{item.source.months.map((m: number) => `${m}月`).join("、")}
+                      </span>
+                    ) : null}
+                    {(isInactive || isResigned) && item.source?.months?.length ? (
+                      <span className="text-[10px] whitespace-nowrap flex items-center gap-0.5">
+                        {Array.from({ length: diffResult.latestMonth || Math.max(...(item.source.months || [1])) }, (_, i) => i + 1).map(m => {
+                          const hasData = item.source!.months.includes(m);
+                          return (
+                            <span
+                              key={m}
+                              className={`px-0.5 rounded ${hasData ? "text-emerald-600" : "text-red-500"}`}
+                            >
+                              {m}月{hasData ? "✓" : "✗"}
+                            </span>
+                          );
+                        })}
+                      </span>
+                    ) : null}
+                    {isTransferred && (
+                      <span className="text-[10px] text-purple-600 whitespace-nowrap">
+                        {item.system?.parent || "?"} → {item.suggestedParent || "?"}
+                      </span>
+                    )}
+                    {!isResigned && !isTransferred && item.system && (
                       <span className="text-[10px] text-gray-400 whitespace-nowrap">
                         现有上级：{item.system.parent || "无"}
                       </span>
@@ -322,6 +441,26 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
                   <div className="flex items-center gap-2 shrink-0">
                     {item.action === "reject" ? (
                       <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded">已忽略</span>
+                    ) : isResigned ? (
+                      item.action === "modify" ? (
+                        <span className="text-[10px] text-red-600 bg-red-50 px-2 py-0.5 rounded font-medium">
+                          确认离职
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded font-medium animate-pulse">
+                          待确认
+                        </span>
+                      )
+                    ) : isInactive ? (
+                      item.action === "modify" ? (
+                        <span className="text-[10px] text-red-600 bg-red-50 px-2 py-0.5 rounded font-medium">
+                          标记离职
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                          保留在职
+                        </span>
+                      )
                     ) : isDirector ? (
                       <span className="text-[10px] text-purple-600 bg-purple-50 px-2 py-0.5 rounded font-medium">
                         最高级别
@@ -342,6 +481,11 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
                 {/* Expanded detail */}
                 {isExpanded && (
                   <div className="px-4 py-3 border-t bg-white space-y-3">
+                    {/* 差异描述 */}
+                    <div className={`text-xs px-3 py-2 rounded-lg ${cfg.bg} ${cfg.color}`}>
+                      {item.diffDescription}
+                    </div>
+
                     {/* Three-way comparison table */}
                     <table className="w-full text-xs border-collapse">
                       <thead>
@@ -389,7 +533,13 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
                             {isDirector ? "（最高级别）" : (item.renwang?.parent || (item.renwang ? "无" : "—"))}
                           </td>
                           <td className="py-2">{item.renwang?.roleLabel || "—"}</td>
-                          <td className="py-2">{item.renwang ? <span className="text-cyan-600">在册</span> : "—"}</td>
+                          <td className="py-2">
+                            {item.renwang ? (
+                              <span className="text-cyan-600">在册</span>
+                            ) : (
+                              <span className="text-red-500 font-medium">未在册</span>
+                            )}
+                          </td>
                           <td className="py-2">—</td>
                           <td className="py-2">—</td>
                         </tr>
@@ -404,9 +554,33 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
                             {isDirector ? "（最高级别）" : (item.source?.parent || (item.source ? "空（缺失）" : "—"))}
                           </td>
                           <td className="py-2">{item.source?.roleLabel || "—"}</td>
-                          <td className="py-2">{item.source ? <span className="text-blue-600">有出单</span> : "—"}</td>
                           <td className="py-2">
-                            {item.source?.months?.length ? item.source.months.map(m => `${m}月`).join("、") : "—"}
+                            {item.source ? (
+                              <span className="text-blue-600">有出单</span>
+                            ) : (
+                              <span className="text-gray-400">无出单</span>
+                            )}
+                          </td>
+                          <td className="py-2">
+                            {item.source?.months?.length ? (
+                              <span className="flex flex-wrap gap-1">
+                                {Array.from({ length: diffResult.latestMonth || Math.max(...(item.source.months || [1])) }, (_, i) => i + 1).map(m => {
+                                  const hasData = item.source!.months.includes(m);
+                                  return (
+                                    <span
+                                      key={m}
+                                      className={`inline-flex items-center px-1 py-0.5 rounded text-[10px] font-medium ${
+                                        hasData
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : "bg-red-100 text-red-600"
+                                      }`}
+                                    >
+                                      {m}月{hasData ? "✓" : "✗"}
+                                    </span>
+                                  );
+                                })}
+                              </span>
+                            ) : "—"}
                           </td>
                           <td className="py-2">
                             {item.source ? `${item.source.policyCount}单 / ${formatPremium(item.source.totalPremium)}` : "—"}
@@ -417,8 +591,60 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
 
                     {/* Action area */}
                     <div className="flex items-center gap-3 pt-2 border-t">
-                      {isDirector ? (
-                        /* 总监：不需要选择上级，只显示确认信息 */
+                      {isResigned || isInactive ? (
+                        /* 疑似离职 / 未出现：提供"确认离职"和"保留在职"按钮 */
+                        <>
+                          <div className="flex-1 flex items-center gap-2">
+                            <span className={`text-xs px-3 py-1.5 rounded-lg border ${
+                              isResigned
+                                ? "text-red-600 bg-red-50 border-red-200"
+                                : "text-gray-600 bg-gray-50 border-gray-200"
+                            }`}>
+                              {isResigned
+                                ? (item.system
+                                    ? "该人员在人网和业务数据中均未出现，建议标记为离职"
+                                    : "该人员仅在历史保单中出现，人网中已不存在，疑似已离职"
+                                  )
+                                : "该人员在部分数据中未出现，请确认是否离职"
+                              }
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => updateItem(item.id, { action: "modify" })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+                              item.action === "modify"
+                                ? "bg-red-600 text-white border border-red-600"
+                                : "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200"
+                            }`}
+                          >
+                            <span className="flex items-center gap-1">
+                              <UserMinus className="w-3.5 h-3.5" />
+                              {item.action === "modify" ? "已确认离职" : "确认离职"}
+                            </span>
+                          </button>
+                          <button
+                            onClick={() => updateItem(item.id, { action: "accept" })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+                              item.action === "accept"
+                                ? "bg-emerald-600 text-white border border-emerald-600"
+                                : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
+                            }`}
+                          >
+                            {item.action === "accept" ? "保留在职" : "保留在职"}
+                          </button>
+                          <button
+                            onClick={() => updateItem(item.id, { action: item.action === "reject" ? (isResigned ? "modify" : "accept") : "reject" })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+                              item.action === "reject"
+                                ? "bg-gray-200 text-gray-700 border border-gray-300"
+                                : "bg-gray-100 text-gray-500 hover:bg-gray-200 border border-transparent"
+                            }`}
+                          >
+                            {item.action === "reject" ? "已忽略" : "忽略"}
+                          </button>
+                        </>
+                      ) : isDirector ? (
+                        /* 总监 */
                         <>
                           <div className="flex-1 flex items-center gap-2">
                             <span className="text-xs text-purple-600 font-medium bg-purple-50 px-3 py-1.5 rounded-lg border border-purple-200">
@@ -437,9 +663,11 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
                           </button>
                         </>
                       ) : (
-                        /* 营业部经理和客户经理：选择上级 */
+                        /* 其他类型：选择上级 */
                         <>
-                          <label className="text-xs text-gray-500 shrink-0 font-medium">确认上级：</label>
+                          <label className="text-xs text-gray-500 shrink-0 font-medium">
+                            {isTransferred ? "确认新上级：" : "确认上级："}
+                          </label>
                           {(() => {
                             const options = getParentOptionsForRole(item.role);
                             return (
@@ -462,6 +690,12 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
                               </select>
                             );
                           })()}
+                          {item.confirmedParent && item.confirmedParent !== DIRECT_PARENT && item.action === "accept" ? (
+                            <span className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-100 text-emerald-700 border border-emerald-300 whitespace-nowrap flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              已确认
+                            </span>
+                          ) : null}
                           <button
                             onClick={() => updateItem(item.id, { confirmedParent: DIRECT_PARENT, action: "accept" })}
                             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
@@ -473,7 +707,10 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
                             公司直营
                           </button>
                           <button
-                            onClick={() => updateItem(item.id, { action: item.action === "reject" ? "accept" : "reject" })}
+                            onClick={() => updateItem(item.id, {
+                              action: item.action === "reject" ? "accept" : "reject",
+                              confirmedParent: item.action === "reject" ? (item.suggestedParent || "") : "",
+                            })}
                             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
                               item.action === "reject"
                                 ? "bg-red-100 text-red-700 border border-red-300"
@@ -503,14 +740,21 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
         <div className="px-6 py-3.5 border-t bg-gray-50 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-4 text-xs text-gray-500">
             <span>共 <strong className="text-gray-700">{items.length}</strong> 项差异</span>
+            {(typeCounts["resigned"] || 0) > 0 && (
+              <span className="text-red-600">
+                {resignedActionCount}/{typeCounts["resigned"]} 人确认离职
+              </span>
+            )}
+            {(typeCounts["transferred"] || 0) > 0 && (
+              <span className="text-purple-600">{typeCounts["transferred"]} 人调岗</span>
+            )}
             {directorCount > 0 && <span className="text-purple-600">{directorCount} 名总监</span>}
-            {rejectedCount > 0 && <span className="text-red-500">{rejectedCount} 项已忽略</span>}
+            {rejectedCount > 0 && <span className="text-gray-400">{rejectedCount} 项已忽略</span>}
             {unresolvedCount > 0 && (
               <button
                 onClick={() => {
                   setFilterType("all");
                   setSearchText("");
-                  // 滚动到第一个待指定项
                   setTimeout(() => {
                     const el = document.querySelector('[data-unresolved="true"]');
                     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -518,7 +762,15 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
                 }}
                 className="text-orange-600 font-medium animate-pulse hover:underline cursor-pointer"
               >
-                {unresolvedCount} 项待指定上级 ← 点击定位
+                {unresolvedCount} 项待指定上级
+              </button>
+            )}
+            {unresolvedConflicts.length > 0 && (
+              <button
+                onClick={() => setFilterType("conflict")}
+                className="text-red-600 font-medium animate-pulse hover:underline cursor-pointer"
+              >
+                {unresolvedConflicts.length} 项冲突待解决
               </button>
             )}
           </div>
@@ -531,11 +783,16 @@ export default function StaffDiffPanel({ diffResult, onClose, onConfirmed }: Pro
             </button>
             <button
               onClick={handleConfirmAll}
-              disabled={submitting}
-              className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+              disabled={submitting || unresolvedConflicts.length > 0}
+              className={`px-5 py-2 rounded-lg text-sm font-medium text-white transition-colors flex items-center gap-2 ${
+                unresolvedConflicts.length > 0
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              }`}
+              title={unresolvedConflicts.length > 0 ? `还有 ${unresolvedConflicts.length} 项冲突未解决` : undefined}
             >
               <CheckCheck className="w-4 h-4" />
-              {submitting ? "正在更新..." : "确认并更新组织架构"}
+              {submitting ? "正在更新..." : unresolvedConflicts.length > 0 ? `请先解决 ${unresolvedConflicts.length} 项冲突` : "确认并更新组织架构"}
             </button>
           </div>
         </div>

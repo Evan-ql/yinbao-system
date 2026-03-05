@@ -44,13 +44,47 @@ export function processReport(
   console.log('[Report] Loading lookup tables...');
   const lookups = loadLookupTables(templateBuffer);
   // 用 settings 中的 deptTargets 覆盖模板中的（用户可能已修改角色或目标）
-  const settingsDeptTargets = getSettingsData().deptTargets;
+  const settings = getSettingsData();
+  const settingsDeptTargets = settings.deptTargets;
   if (settingsDeptTargets && settingsDeptTargets.length > 0) {
     lookups.deptTargets.clear();
     for (const t of settingsDeptTargets) {
       lookups.deptTargets.set(t.deptName, { qjTarget: t.qjTarget || 0, dcTarget: t.dcTarget || 0 });
     }
     console.log(`[Report] Overrode deptTargets from settings (${settingsDeptTargets.length} entries)`);
+  }
+
+  // 从 deptTargets 中移除已离职的营业部经理
+  // 离职人员在离职前的月份仍保留在报表中，离职后的月份不再显示
+  const staffList: any[] = settings.staff || [];
+  const staffNameSet = new Set<string>();
+  const resignedNames = new Set<string>();
+  for (const s of staffList) {
+    if (s.role === 'deptManager') {
+      staffNameSet.add(s.name);
+      if (s.status === 'resigned') {
+        const resignedMonth = s.resignedMonth || 0;
+        // 如果报表的结束月份 >= 离职月份，则从目标中移除
+        if (resignedMonth === 0 || monthEnd >= resignedMonth) {
+          resignedNames.add(s.name);
+        }
+      }
+    }
+  }
+  // 双重检查：如果 deptTargets 中的人在 staff 中完全不存在（被删除而非标记resigned），也移除
+  for (const [name] of lookups.deptTargets) {
+    if (!staffNameSet.has(name)) {
+      resignedNames.add(name);
+      console.log(`[Report] Dept manager '${name}' not found in staff, will be removed from targets`);
+    }
+  }
+  if (resignedNames.size > 0) {
+    for (const name of resignedNames) {
+      if (lookups.deptTargets.has(name)) {
+        lookups.deptTargets.delete(name);
+        console.log(`[Report] Removed dept manager from targets (monthEnd=${monthEnd}): ${name}`);
+      }
+    }
   }
 
   console.log('[Report] Generating data source...');
@@ -86,7 +120,7 @@ export function processReport(
   }
 
   console.log('[Report] Generating dept data...');
-  const deptData = generateDeptData(hrRows, dataRows, netRows, lookups, monthStart, monthEnd, dailyRows);
+  const deptData = generateDeptData(hrRows, dataRows, netRows, lookups, monthStart, monthEnd, dailyRows, resignedNames);
 
   console.log('[Report] Generating channel data...');
   const channelData = generateChannelData(dataRows, netRows, hrRows, lookups, monthStart, monthEnd);

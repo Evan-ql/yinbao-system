@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
-import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import { exportToExcel, ExportColumn, ExportSheet } from "@/lib/exportExcel";
 import ExportButton from "@/components/ExportButton";
 
 export default function PremiumDistPage() {
@@ -14,25 +14,69 @@ export default function PremiumDistPage() {
     ? reportData?.dept?.premiumDist
     : reportData?.dept?.premiumDistDc;
 
+  const premiumDistQj = reportData?.dept?.premiumDist;
+  const premiumDistDc = reportData?.dept?.premiumDistDc;
 
-  const handleExport = () => {
-    if (!premiumDist) return;
+  // 构建某个维度的sheet数据
+  const buildSheetData = (dist: any) => {
+    if (!dist) return { columns: [] as ExportColumn[], data: [] as any[], total: undefined as any };
     const columns: ExportColumn[] = [
       { header: "营业部", key: "name", width: 14 },
-      ...premiumDist.headers.map((h: string) => ({ header: h, key: h, type: "number" as const, width: 14 })),
+      ...dist.headers.map((h: string) => ({ header: h, key: h, type: "number" as const, width: 14 })),
     ];
-    const data = premiumDist.rows.map((r: any) => {
+    const data = dist.rows.map((r: any) => {
       const rowData: any = { name: r.name };
-      premiumDist.headers.forEach((h: string, i: number) => { rowData[h] = r.values[i] || 0; });
+      dist.headers.forEach((h: string, i: number) => { rowData[h] = r.values[i] || 0; });
       return rowData;
     });
-    exportToExcel({ columns, data, fileName: `${mode === "qj" ? "年交" : "趸交"}保费分布图` });
+    // 合计行
+    const totalRowData: any = { name: "中支合计" };
+    dist.headers.forEach((h: string, i: number) => {
+      totalRowData[h] = dist.rows.reduce((s: number, r: any) => s + (r.values?.[i] || 0), 0);
+    });
+    return { columns, data, total: totalRowData };
+  };
+
+  const handleExport = () => {
+    const sheets: ExportSheet[] = [];
+
+    if (premiumDistQj) {
+      const { columns, data, total } = buildSheetData(premiumDistQj);
+      sheets.push({
+        sheetName: "期交",
+        title: "保费分布图-期交",
+        columns,
+        data,
+        totalRow: total,
+        totalLabel: "中支合计",
+      });
+    }
+
+    if (premiumDistDc) {
+      const { columns, data, total } = buildSheetData(premiumDistDc);
+      sheets.push({
+        sheetName: "趸交",
+        title: "保费分布图-趸交",
+        columns,
+        data,
+        totalRow: total,
+        totalLabel: "中支合计",
+      });
+    }
+
+    if (sheets.length === 0) return;
+
+    exportToExcel({
+      columns: [],
+      fileName: "保费分布图",
+      sheets,
+    });
   };
 
   return (
     <DeptSubPageWrapper
-      title={`${mode === "qj" ? "年交" : "赸交"}保费分布图`}
-      description={`各营业部在各银行渠道的${mode === "qj" ? "年交" : "赸交"}保费金额`}
+      title={`${mode === "qj" ? "期交" : "趸交"}保费分布图`}
+      description={`各营业部在各银行渠道的${mode === "qj" ? "期交" : "趸交"}保费金额`}
       extraControls={<ExportButton onClick={handleExport} />}
     >
       <div className="flex justify-end mb-3">
@@ -45,7 +89,7 @@ export default function PremiumDistPage() {
             }`}
             onClick={() => setMode("qj")}
           >
-            年交
+            期交
           </button>
           <button
             className={`px-3 py-1.5 transition-colors ${

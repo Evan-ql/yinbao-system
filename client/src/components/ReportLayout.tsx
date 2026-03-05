@@ -80,7 +80,7 @@ export default function ReportLayout({ children }: { children: ReactNode }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `银保报表_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.xlsx`;
+      a.download = `银保报表_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -234,7 +234,7 @@ export default function ReportLayout({ children }: { children: ReactNode }) {
               onClick={handleExport}
               disabled={exporting}
               className="w-full flex items-center justify-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
-              title="导出总表Excel"
+              title="导出总表(ZIP)"
             >
               <Download className={`w-4 h-4 shrink-0 ${exporting ? 'animate-bounce' : ''}`} />
               {!collapsed && <span>{exporting ? '导出中...' : '导出总表'}</span>}

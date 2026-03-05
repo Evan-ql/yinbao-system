@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useState } from "react";
-import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import { exportToExcel, ExportColumn, ExportSheet } from "@/lib/exportExcel";
 import ExportButton from "@/components/ExportButton";
 
 function fmt(v: number): string {
@@ -16,7 +16,6 @@ export default function TrackingView({ data }: { data: any }) {
 
   const handleExport = () => {
     const columns: ExportColumn[] = [
-      { header: "营业部", key: "deptName", width: 14 },
       { header: "姓名", key: "name", width: 10 },
       { header: "期交保费", key: "qjbf", type: "number", width: 14 },
       { header: "非邮期交", key: "feiyouQj", type: "number", width: 14 },
@@ -28,25 +27,34 @@ export default function TrackingView({ data }: { data: any }) {
       { header: "网点总数", key: "wdTotal", type: "number", width: 10 },
       { header: "活动网点", key: "activeWd", type: "number", width: 10 },
     ];
-    const rows: any[] = [];
-    for (const group of data.groups) {
-      for (const m of group.members) {
-        rows.push({
-          deptName: group.deptName,
-          name: m.name,
-          qjbf: m.qjbf,
-          feiyouQj: m.feiyouQj,
-          guibao: m.guibao,
-          jzdc: m.jzdc,
-          gmdc: m.gmdc,
-          bb: m.bb,
-          js: m.js,
-          wdTotal: m.wdTotal,
-          activeWd: m.activeWd,
-        });
-      }
-    }
-    exportToExcel(columns, rows, "追踪报表");
+
+    // 每个营业部经理一个Sheet
+    const sheets: ExportSheet[] = data.groups.map((group: any) => {
+      const sheetData = group.members.map((m: any) => ({
+        name: m.name,
+        qjbf: m.qjbf,
+        feiyouQj: m.feiyouQj,
+        guibao: m.guibao,
+        jzdc: m.jzdc,
+        gmdc: m.gmdc,
+        bb: m.bb,
+        js: m.js,
+        wdTotal: m.wdTotal,
+        activeWd: m.activeWd,
+      }));
+      return {
+        sheetName: group.deptName,
+        title: group.deptName,
+        columns,
+        data: sheetData,
+      };
+    });
+
+    exportToExcel({
+      columns: [],
+      fileName: "追踪报表",
+      sheets,
+    });
   };
 
   return (

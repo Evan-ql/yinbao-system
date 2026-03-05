@@ -18,6 +18,7 @@ export interface Staff {
   parentId: string; // 上级姓名（总监的parentId为空）
   status: 'active' | 'resigned' | 'transferred'; // 在职/离职/转岗
   month: number; // 生效月份 1-12，0表示全年默认状态
+  resignedMonth?: number; // 离职月份，用于报表过滤
 }
 
 export interface DeptTarget {

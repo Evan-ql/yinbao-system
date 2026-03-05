@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { pct, fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
-import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import { exportToExcel, ExportColumn, ExportSheet } from "@/lib/exportExcel";
 import ExportButton from "@/components/ExportButton";
 
 export default function TieganPage() {
@@ -28,28 +28,103 @@ export default function TieganPage() {
   const kaidanCount = filteredDetails.filter((d: any) => d.kaidan).length;
   const weiKaidanCount = filteredDetails.filter((d: any) => !d.kaidan).length;
 
-
-  const handleExport = () => {
+  // ─── 导出：营业部汇总 ───
+  const handleExportSummary = () => {
     if (!tieganData || tieganData.length === 0) return;
-    const columns: ExportColumn[] = [
-      { header: "营业部", key: "dept", width: 14 },
-      { header: "铁杆网点数", key: "count", type: "number", width: 12 },
-      { header: "已开单", key: "opened", type: "number", width: 10 },
-      { header: "未开单", key: "notOpened", type: "number", width: 10 },
-      { header: "开单率", key: "rate", width: 10 },
+    const summaryColumns: ExportColumn[] = [
+      { header: "营业部", key: "name", width: 14 },
+      { header: "总数", key: "total", type: "number", width: 10 },
+      { header: "开单", key: "kaidan", type: "number", width: 10 },
+      { header: "开单率", key: "kaidanRateStr", width: 10 },
+      { header: "差距", key: "gap", type: "number", width: 10 },
     ];
-    const data = tieganData.map((r: any) => ({
-      dept: r.dept || r.name || "",
-      count: r.count || 0,
-      opened: r.opened || 0,
-      notOpened: r.notOpened || 0,
-      rate: r.rate || "0%",
+    const summaryData = tieganData.map((t: any) => ({
+      name: t.name,
+      total: t.total,
+      kaidan: t.kaidan,
+      kaidanRateStr: t.total > 0 ? pct(t.kaidanRate) : "-",
+      gap: t.gap,
     }));
-    exportToExcel({ columns, data, fileName: "铁杆网点" });
+    const summaryTotal = {
+      name: "邯郸中支",
+      total: tieganData.reduce((s: number, t: any) => s + t.total, 0),
+      kaidan: tieganData.reduce((s: number, t: any) => s + t.kaidan, 0),
+      kaidanRateStr: (() => {
+        const tt = tieganData.reduce((s: number, t: any) => s + t.total, 0);
+        const tk = tieganData.reduce((s: number, t: any) => s + t.kaidan, 0);
+        return tt > 0 ? pct(tk / tt) : "-";
+      })(),
+      gap: tieganData.reduce((s: number, t: any) => s + t.gap, 0),
+    };
+
+    exportToExcel({
+      columns: summaryColumns,
+      data: summaryData,
+      totalRow: summaryTotal,
+      totalLabel: "邯郸中支",
+      title: "铁杆网点-营业部汇总",
+      fileName: "铁杆网点-营业部汇总",
+    });
+  };
+
+  // ─── 导出：客户经理明细（3个Sheet：全部/已开单/未开单）───
+  const handleExportDetail = () => {
+    if (!tieganDetails || tieganDetails.length === 0) return;
+
+    const detailColumns: ExportColumn[] = [
+      { header: "营业部", key: "dept", width: 14 },
+      { header: "客户经理", key: "customerManager", width: 12 },
+      { header: "网点名称", key: "agencyName", width: 30 },
+      { header: "银行", key: "bankName", width: 14 },
+      { header: "年交保费", key: "nj", type: "number", width: 14 },
+      { header: "状态", key: "status", width: 10 },
+    ];
+
+    const buildDetailData = (list: any[]) =>
+      list.map((d: any) => ({
+        dept: d.dept,
+        customerManager: d.customerManager,
+        agencyName: d.agencyName,
+        bankName: d.bankName,
+        nj: d.nj || 0,
+        status: d.kaidan ? "已开单" : "未开单",
+      }));
+
+    const allDetails = tieganDetails;
+    const kaidanList = allDetails.filter((d: any) => d.kaidan);
+    const weiKaidanList = allDetails.filter((d: any) => !d.kaidan);
+
+    const sheets: ExportSheet[] = [
+      {
+        sheetName: "全部",
+        title: "客户经理明细-全部",
+        columns: detailColumns,
+        data: buildDetailData(allDetails),
+      },
+      {
+        sheetName: "已开单",
+        title: "客户经理明细-已开单",
+        columns: detailColumns,
+        data: buildDetailData(kaidanList),
+      },
+      {
+        sheetName: "未开单",
+        title: "客户经理明细-未开单",
+        columns: detailColumns,
+        data: buildDetailData(weiKaidanList),
+      },
+    ];
+
+    exportToExcel({
+      columns: [],
+      fileName: "铁杆网点-客户经理明细",
+      sheets,
+    });
   };
 
   return (
-    <DeptSubPageWrapper title="铁杆网点" description="各营业部铁杆网点开单情况" extraControls={<ExportButton onClick={handleExport} />}>
+    <DeptSubPageWrapper title="铁杆网点" description="各营业部铁杆网点开单情况"
+      extraControls={<ExportButton onClick={handleExportSummary} label="导出" />}>
       {/* 营业部汇总表 */}
       <Card>
         <CardHeader className="pb-3">
@@ -155,6 +230,7 @@ export default function TieganPage() {
                     未开单
                   </button>
                 </div>
+                <ExportButton onClick={handleExportDetail} label="导出" />
               </div>
             </div>
           </CardHeader>

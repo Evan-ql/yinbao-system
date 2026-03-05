@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { thCls, tdCls, monoR, rowHover } from "@/components/dept/tableStyles";
-import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import { exportToExcel, ExportColumn, ExportSheet } from "@/lib/exportExcel";
 import ExportButton from "@/components/ExportButton";
 
 export default function PersonalCountPage() {
@@ -14,15 +14,46 @@ export default function PersonalCountPage() {
     ? reportData?.dept?.personalCountTop
     : reportData?.dept?.personalCountTopFeiyou;
 
+  const personalCountTopAll = reportData?.dept?.personalCountTop;
+  const personalCountTopFeiyou = reportData?.dept?.personalCountTopFeiyou;
+
   const handleExport = () => {
-    if (!personalCountTop || personalCountTop.length === 0) return;
     const columns: ExportColumn[] = [
       { header: "排名", key: "rank", width: 8 },
       { header: "姓名", key: "name", width: 10 },
       { header: "件数", key: "js", type: "number", width: 10 },
     ];
-    const data = personalCountTop.map((p: any, i: number) => ({ rank: i + 1, name: p.name, js: p.js }));
-    exportToExcel({ columns, data, fileName: `个人件数前10_${mode === "all" ? "全渠道" : "非邮"}` });
+
+    const buildData = (list: any[]) =>
+      list.map((p: any, i: number) => ({ rank: i + 1, name: p.name, js: p.js }));
+
+    const sheets: ExportSheet[] = [];
+
+    if (personalCountTopAll && personalCountTopAll.length > 0) {
+      sheets.push({
+        sheetName: "全渠道",
+        title: "个人件数前10-全渠道",
+        columns,
+        data: buildData(personalCountTopAll),
+      });
+    }
+
+    if (personalCountTopFeiyou && personalCountTopFeiyou.length > 0) {
+      sheets.push({
+        sheetName: "非邮",
+        title: "个人件数前10-非邮",
+        columns,
+        data: buildData(personalCountTopFeiyou),
+      });
+    }
+
+    if (sheets.length === 0) return;
+
+    exportToExcel({
+      columns: [],
+      fileName: "个人件数前10",
+      sheets,
+    });
   };
 
   return (

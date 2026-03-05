@@ -38,22 +38,85 @@ export default function BusinessDataPage() {
     </div>
   );
 
+  const columns: ExportColumn[] = [
+    { header: "排名", key: "rank", width: 8 },
+    { header: "营业部", key: "name", width: 14 },
+    { header: "月期交", key: "monthQj", type: "number", width: 14 },
+    { header: "期交目标", key: "qjTarget", type: "number", width: 14 },
+    { header: "达成差距", key: "qjGap", type: "number", width: 14 },
+    { header: "规模趸", key: "gmdc", type: "number", width: 14 },
+    { header: "趸交目标", key: "dcTarget", type: "number", width: 14 },
+    { header: "达成差距(趸)", key: "dcGap", type: "number", width: 14 },
+  ];
 
   const handleExport = () => {
-    if (!ranking) return;
-    const columns: ExportColumn[] = [
-      { header: "排名", key: "rank", width: 8 },
-      { header: "营业部", key: "dept", width: 14 },
-      { header: "期交保费", key: "qjbf", type: "number", width: 14 },
-      { header: "非邮期交", key: "feiyouQj", type: "number", width: 14 },
-      { header: "规保", key: "guibao", type: "number", width: 14 },
-      { header: "趸交", key: "dc", type: "number", width: 14 },
-      { header: "件数", key: "js", type: "number", width: 10 },
-    ];
+    if (!deptRanking && !deptRankingAll) return;
+
+    // 构建非邮数据
+    const feiyouData = (deptRanking || []).map((d: any) => ({
+      rank: d.rank,
+      name: d.name,
+      monthQj: d.monthQj,
+      qjTarget: d.qjTarget,
+      qjGap: d.qjGap,
+      gmdc: d.gmdc,
+      dcTarget: d.dcTarget,
+      dcGap: d.dcGap,
+    }));
+    const feiyouTotal = totals ? {
+      rank: "",
+      name: "邯郸中支",
+      monthQj: totals.totalQj,
+      qjTarget: totals.totalQjTarget,
+      qjGap: totals.totalQjGap,
+      gmdc: totals.totalGmdc,
+      dcTarget: totals.totalDcTarget,
+      dcGap: totals.totalDcGap,
+    } : undefined;
+
+    // 构建全渠道数据
+    const allData = (deptRankingAll || []).map((d: any) => ({
+      rank: d.rank,
+      name: d.name,
+      monthQj: d.monthQj,
+      qjTarget: d.qjTarget,
+      qjGap: d.qjGap,
+      gmdc: d.gmdc,
+      dcTarget: d.dcTarget,
+      dcGap: d.dcGap,
+    }));
+    const allTotal = totalsAll ? {
+      rank: "",
+      name: "邯郸中支",
+      monthQj: totalsAll.totalQj,
+      qjTarget: totalsAll.totalQjTarget,
+      qjGap: totalsAll.totalQjGap,
+      gmdc: totalsAll.totalGmdc,
+      dcTarget: totalsAll.totalDcTarget,
+      dcGap: totalsAll.totalDcGap,
+    } : undefined;
+
     exportToExcel({
       columns,
-      data: ranking,
-      fileName: `业务数据_${mode === "feiyou" ? "非邮" : "全渠道"}`,
+      fileName: "业务数据",
+      sheets: [
+        {
+          sheetName: "非邮",
+          title: "业务数据（非邮）",
+          columns,
+          data: feiyouData,
+          totalRow: feiyouTotal,
+          totalLabel: "邯郸中支",
+        },
+        {
+          sheetName: "全渠道",
+          title: "业务数据（全渠道）",
+          columns,
+          data: allData,
+          totalRow: allTotal,
+          totalLabel: "邯郸中支",
+        },
+      ],
     });
   };
 

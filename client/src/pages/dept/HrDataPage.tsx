@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { pct, fmt, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
-import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import { exportToExcel, ExportColumn, ExportSheet } from "@/lib/exportExcel";
 import ExportButton from "@/components/ExportButton";
 
 export default function HrDataPage() {
@@ -37,29 +37,134 @@ export default function HrDataPage() {
     });
   };
 
-  const handleExport = () => {
-    const columns: ExportColumn[] = [
+  // ─── 导出：营业部汇总 ───
+  const handleExportSummary = () => {
+    if (!hrStats || hrStats.length === 0) return;
+    const summaryColumns: ExportColumn[] = [
+      { header: "排名", key: "rank", width: 8 },
+      { header: "营业部", key: "name", width: 14 },
+      { header: "挂网", key: "guawang", type: "number", width: 10 },
+      { header: "破零人力", key: "poling", type: "number", width: 10 },
+      { header: "开单率", key: "kaidanRateStr", width: 10 },
+      { header: "规保2万", key: "guibao2w", type: "number", width: 10 },
+    ];
+    const summaryData = hrStats.map((h: any) => ({
+      rank: h.rank,
+      name: h.name,
+      guawang: h.guawang,
+      poling: h.poling,
+      kaidanRateStr: pct(h.kaidanRate),
+      guibao2w: h.guibao2w,
+    }));
+    const summaryTotal = {
+      rank: "",
+      name: "邯郸中支",
+      guawang: hrStats.reduce((s: number, h: any) => s + h.guawang, 0),
+      poling: hrStats.reduce((s: number, h: any) => s + h.poling, 0),
+      kaidanRateStr: (() => {
+        const totalGw = hrStats.reduce((s: number, h: any) => s + h.guawang, 0);
+        const totalPl = hrStats.reduce((s: number, h: any) => s + h.poling, 0);
+        return totalGw > 0 ? pct(totalPl / totalGw) : "0%";
+      })(),
+      guibao2w: hrStats.reduce((s: number, h: any) => s + h.guibao2w, 0),
+    };
+
+    exportToExcel({
+      columns: summaryColumns,
+      data: summaryData,
+      totalRow: summaryTotal,
+      totalLabel: "邯郸中支",
+      title: "人力数据-营业部汇总",
+      fileName: "人力数据-营业部汇总",
+    });
+  };
+
+  // ─── 导出：在职经理开单明细（3个Sheet：全部/已开单/未开单）───
+  const handleExportDetail = () => {
+    if (!hrManagerDetails || hrManagerDetails.length === 0) return;
+
+    const detailColumns: ExportColumn[] = [
       { header: "营业部", key: "dept", width: 14 },
       { header: "姓名", key: "name", width: 10 },
+      { header: "期交保费", key: "qjbf", type: "number", width: 14 },
+      { header: "件数", key: "js", type: "number", width: 10 },
       { header: "开单状态", key: "status", width: 10 },
-      { header: "网点名称", key: "network", width: 20 },
-      { header: "银行", key: "bank", width: 14 },
-      { header: "年交保费", key: "nj", type: "number", width: 14 },
+      { header: "网点名称", key: "wdName", width: 30 },
+      { header: "银行", key: "bankName", width: 14 },
+      { header: "网点件数", key: "netJs", type: "number", width: 10 },
+      { header: "网点金额", key: "netAmount", type: "number", width: 14 },
     ];
-    const data = filteredDetails.map((d: any) => ({
-      dept: d.dept || "",
-      name: d.customerManager || "",
-      status: d.kaidan ? "已开单" : "未开单",
-      network: d.agencyName || "",
-      bank: d.bankName || "",
-      nj: d.nj || 0,
-    }));
-    exportToExcel({ columns, data, fileName: "人力数据" });
+
+    // 构建明细数据（展开网点）
+    const buildDetailData = (list: any[]) => {
+      const result: any[] = [];
+      for (const d of list) {
+        if (d.networks && d.networks.length > 0) {
+          for (const n of d.networks) {
+            result.push({
+              dept: d.dept,
+              name: d.name,
+              qjbf: d.qjbf,
+              js: d.js,
+              status: d.kaidan ? "已开单" : "未开单",
+              wdName: n.wdName,
+              bankName: n.bankName,
+              netJs: n.js,
+              netAmount: n.amount,
+            });
+          }
+        } else {
+          result.push({
+            dept: d.dept,
+            name: d.name,
+            qjbf: d.qjbf,
+            js: d.js,
+            status: d.kaidan ? "已开单" : "未开单",
+            wdName: "",
+            bankName: "",
+            netJs: 0,
+            netAmount: 0,
+          });
+        }
+      }
+      return result;
+    };
+
+    const allDetails = hrManagerDetails;
+    const kaidanDetails = allDetails.filter((d: any) => d.kaidan);
+    const weiKaidanDetails = allDetails.filter((d: any) => !d.kaidan);
+
+    const sheets: ExportSheet[] = [
+      {
+        sheetName: "全部",
+        title: "在职经理开单明细-全部",
+        columns: detailColumns,
+        data: buildDetailData(allDetails),
+      },
+      {
+        sheetName: "已开单",
+        title: "在职经理开单明细-已开单",
+        columns: detailColumns,
+        data: buildDetailData(kaidanDetails),
+      },
+      {
+        sheetName: "未开单",
+        title: "在职经理开单明细-未开单",
+        columns: detailColumns,
+        data: buildDetailData(weiKaidanDetails),
+      },
+    ];
+
+    exportToExcel({
+      columns: [],
+      fileName: "在职经理开单明细",
+      sheets,
+    });
   };
 
   return (
     <DeptSubPageWrapper title="人力数据" description="各营业部人力与开单情况"
-      extraControls={<ExportButton onClick={handleExport} />}>
+      extraControls={<ExportButton onClick={handleExportSummary} label="导出" />}>
       {/* 原有营业部汇总表 */}
       <Card>
         <CardHeader className="pb-3">
@@ -167,6 +272,7 @@ export default function HrDataPage() {
                     未开单
                   </button>
                 </div>
+                <ExportButton onClick={handleExportDetail} label="导出" />
               </div>
             </div>
           </CardHeader>
@@ -239,20 +345,9 @@ export default function HrDataPage() {
                                       <tr key={ni} className="border-b border-blue-100/60 hover:bg-blue-100/30">
                                         <td className="py-1 px-3 text-foreground">{n.wdName}</td>
                                         <td className="py-1 px-3 text-right font-mono">{n.js}</td>
-                                        <td className="py-1 px-3 text-right font-mono text-amber-600">{fmt(n.amount)}</td>
+                                        <td className="py-1 px-3 text-right font-mono text-amber-600">{n.amount > 0 ? fmt(n.amount) : "0"}</td>
                                       </tr>
                                     ))}
-                                    {d.networks.length > 1 && (
-                                      <tr className="border-t border-blue-200/60 font-semibold bg-blue-100/30">
-                                        <td className="py-1 px-3">合计</td>
-                                        <td className="py-1 px-3 text-right font-mono">
-                                          {d.networks.reduce((s: number, n: any) => s + n.js, 0)}
-                                        </td>
-                                        <td className="py-1 px-3 text-right font-mono text-amber-600">
-                                          {fmt(d.networks.reduce((s: number, n: any) => s + n.amount, 0))}
-                                        </td>
-                                      </tr>
-                                    )}
                                   </tbody>
                                 </table>
                               </div>

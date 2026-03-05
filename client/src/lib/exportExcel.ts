@@ -1,7 +1,7 @@
 /**
  * 通用 Excel 导出工具（前端）
  * 使用 xlsx-js-style 库生成带样式的 Excel 文件并下载
- * v1.1.0
+ * v1.2.0 — 新增 mergeKeys 支持（按指定列合并相同值的连续单元格）
  */
 import XLSX from "xlsx-js-style";
 
@@ -26,6 +26,8 @@ export interface ExportOptions {
   totalLabel?: string;
   footer?: Record<string, any>;
   sheets?: ExportSheet[];
+  /** 需要合并相同连续值的列 key 列表 */
+  mergeKeys?: string[];
 }
 
 export interface ExportSheet {
@@ -36,14 +38,16 @@ export interface ExportSheet {
   dataSource?: Record<string, any>[];
   totalRow?: Record<string, any>;
   totalLabel?: string;
+  /** 需要合并相同连续值的列 key 列表 */
+  mergeKeys?: string[];
 }
 
 /* ────────── 样式定义 ────────── */
 
-/** 标题行样式：深蓝背景 + 白色粗体 + 居中 */
+/** 标题行样式：紫蓝背景 + 白色粗体 + 居中 */
 const titleStyle: XLSX.CellStyle = {
   font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } },
-  fill: { fgColor: { rgb: "1F4E79" } },
+  fill: { fgColor: { rgb: "6366F1" } },
   alignment: { horizontal: "center", vertical: "center" },
   border: {
     top: { style: "thin", color: { rgb: "999999" } },
@@ -53,10 +57,10 @@ const titleStyle: XLSX.CellStyle = {
   },
 };
 
-/** 表头行样式：中蓝背景 + 白色粗体 + 居中 */
+/** 表头行样式：紫蓝背景 + 白色粗体 + 居中 */
 const headerStyle: XLSX.CellStyle = {
   font: { bold: true, sz: 11, color: { rgb: "FFFFFF" } },
-  fill: { fgColor: { rgb: "2E75B6" } },
+  fill: { fgColor: { rgb: "6366F1" } },
   alignment: { horizontal: "center", vertical: "center", wrapText: true },
   border: {
     top: { style: "thin", color: { rgb: "AAAAAA" } },
@@ -78,10 +82,10 @@ const dataStyleEven: XLSX.CellStyle = {
   },
 };
 
-/** 数据行样式（奇数行）：浅蓝背景（斑马纹） */
+/** 数据行样式（奇数行）：浅紫背景（斑马纹） */
 const dataStyleOdd: XLSX.CellStyle = {
   font: { sz: 10 },
-  fill: { fgColor: { rgb: "D6E4F0" } },
+  fill: { fgColor: { rgb: "E8E8FD" } },
   alignment: { horizontal: "center", vertical: "center" },
   border: {
     top: { style: "thin", color: { rgb: "CCCCCC" } },
@@ -117,6 +121,7 @@ function withNumberFmt(base: XLSX.CellStyle, type?: string): XLSX.CellStyle {
 
 /**
  * 构建一个 worksheet（带完整样式）
+ * @param mergeKeys - 需要合并相同连续值的列 key 列表
  */
 function buildSheet(
   columns: ExportColumn[],
@@ -124,6 +129,7 @@ function buildSheet(
   title?: string,
   totalRow?: Record<string, any>,
   totalLabel?: string,
+  mergeKeys?: string[],
 ): XLSX.WorkSheet {
   const wsData: any[][] = [];
   let rowIdx = 0;
@@ -189,6 +195,42 @@ function buildSheet(
   // 创建 worksheet
   const ws = XLSX.utils.aoa_to_sheet(wsData);
 
+  // ────────── 合并单元格 ──────────
+  const merges: XLSX.Range[] = [];
+
+  // 标题行合并
+  if (title) {
+    merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: columns.length - 1 } });
+  }
+
+  // mergeKeys: 按指定列合并相同连续值的单元格
+  if (mergeKeys && mergeKeys.length > 0 && data.length > 0) {
+    for (const mergeKey of mergeKeys) {
+      const colIdx = columns.findIndex((c) => c.key === mergeKey);
+      if (colIdx < 0) continue;
+
+      let startR = dataStartRow;
+      let currentVal = data[0]?.[mergeKey] ?? "";
+
+      for (let i = 1; i <= data.length; i++) {
+        const val = i < data.length ? (data[i]?.[mergeKey] ?? "") : "__END__";
+        if (val !== currentVal) {
+          const endR = dataStartRow + i - 1;
+          if (endR > startR) {
+            merges.push({
+              s: { r: startR, c: colIdx },
+              e: { r: endR, c: colIdx },
+            });
+          }
+          startR = dataStartRow + i;
+          currentVal = val;
+        }
+      }
+    }
+  }
+
+  ws["!merges"] = merges;
+
   // ────────── 应用样式 ──────────
 
   // 标题行样式
@@ -197,10 +239,6 @@ function buildSheet(
       const addr = XLSX.utils.encode_cell({ r: 0, c });
       if (ws[addr]) ws[addr].s = titleStyle;
     }
-    // 合并标题单元格
-    ws["!merges"] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: columns.length - 1 } },
-    ];
   }
 
   // 表头行样式
@@ -265,6 +303,7 @@ export function exportToExcel(
   let totalRow: Record<string, any> | undefined;
   let totalLabel: string | undefined;
   let sheets: ExportSheet[] | undefined;
+  let mergeKeys: string[] | undefined;
 
   // 判断调用方式
   if (arg1 && !Array.isArray(arg1) && typeof arg1 === "object" && "columns" in arg1) {
@@ -277,6 +316,7 @@ export function exportToExcel(
     totalRow = opts.totalRow || opts.footer;
     totalLabel = opts.totalLabel;
     sheets = opts.sheets;
+    mergeKeys = opts.mergeKeys;
   } else if (Array.isArray(arg1) && Array.isArray(arg2)) {
     // 两个数组 + 文件名
     const first = arg1 as any[];
@@ -308,11 +348,12 @@ export function exportToExcel(
         sheet.title,
         sheet.totalRow,
         sheet.totalLabel,
+        sheet.mergeKeys,
       );
       XLSX.utils.book_append_sheet(wb, ws, sheet.sheetName);
     }
   } else {
-    const ws = buildSheet(columns!, data!, title, totalRow, totalLabel);
+    const ws = buildSheet(columns!, data!, title, totalRow, totalLabel, mergeKeys);
     XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
   }
 

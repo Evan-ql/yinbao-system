@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { fmt, thCls, tdCls, monoR, rowHover } from "@/components/dept/tableStyles";
-import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import { exportToExcel, ExportColumn, ExportSheet } from "@/lib/exportExcel";
 import ExportButton from "@/components/ExportButton";
 
 export default function PersonalTop10Page() {
@@ -14,15 +14,46 @@ export default function PersonalTop10Page() {
     ? reportData?.dept?.personalTop
     : reportData?.dept?.personalTopFeiyou;
 
+  const personalTopAll = reportData?.dept?.personalTop;
+  const personalTopFeiyou = reportData?.dept?.personalTopFeiyou;
+
   const handleExport = () => {
-    if (!personalTop || personalTop.length === 0) return;
     const columns: ExportColumn[] = [
       { header: "排名", key: "rank", width: 8 },
       { header: "姓名", key: "name", width: 10 },
       { header: "业绩", key: "premium", type: "number", width: 14 },
     ];
-    const data = personalTop.map((p: any, i: number) => ({ rank: i + 1, name: p.name, premium: p.premium }));
-    exportToExcel({ columns, data, fileName: `个人业绩前10_${mode === "all" ? "全渠道" : "非邮"}` });
+
+    const buildData = (list: any[]) =>
+      list.map((p: any, i: number) => ({ rank: i + 1, name: p.name, premium: p.premium }));
+
+    const sheets: ExportSheet[] = [];
+
+    if (personalTopAll && personalTopAll.length > 0) {
+      sheets.push({
+        sheetName: "全渠道",
+        title: "个人业绩前10-全渠道",
+        columns,
+        data: buildData(personalTopAll),
+      });
+    }
+
+    if (personalTopFeiyou && personalTopFeiyou.length > 0) {
+      sheets.push({
+        sheetName: "非邮",
+        title: "个人业绩前10-非邮",
+        columns,
+        data: buildData(personalTopFeiyou),
+      });
+    }
+
+    if (sheets.length === 0) return;
+
+    exportToExcel({
+      columns: [],
+      fileName: "个人业绩前10",
+      sheets,
+    });
   };
 
   return (

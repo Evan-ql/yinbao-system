@@ -17,7 +17,6 @@ export default function NetworkPerfTab() {
 
   const { networkPerformance = [], networkPerfTotals = {} } = data;
 
-  // 获取银行和营业部列表用于筛选
   const bankList = useMemo(() => {
     const banks = new Set<string>();
     networkPerformance.forEach((n: any) => { if (n.bank) banks.add(n.bank); });
@@ -30,21 +29,17 @@ export default function NetworkPerfTab() {
     return Array.from(depts).sort();
   }, [networkPerformance]);
 
-  // 筛选数据
   const filtered = useMemo(() => {
     let rows = networkPerformance;
     if (bankFilter !== "all") rows = rows.filter((n: any) => n.bank === bankFilter);
     if (deptFilter !== "all") rows = rows.filter((n: any) => n.deptManager === deptFilter);
-    // 按开单状态筛选
     if (statusFilter === "open") rows = rows.filter((n: any) => (mode === "qj" ? n.qj : n.dc) > 0);
     if (statusFilter === "notOpen") rows = rows.filter((n: any) => (mode === "qj" ? n.qj : n.dc) === 0);
-    // 按当前模式排序
     return [...rows].sort((a: any, b: any) =>
       mode === "qj" ? b.qj - a.qj : b.dc - a.dc
     );
   }, [networkPerformance, bankFilter, deptFilter, statusFilter, mode]);
 
-  // 筛选后的合计
   const filteredTotals = useMemo(() => ({
     baofei: filtered.reduce((s: number, n: any) => s + (mode === "qj" ? n.qj : n.dc), 0),
     js: filtered.reduce((s: number, n: any) => s + n.js, 0),
@@ -53,45 +48,78 @@ export default function NetworkPerfTab() {
 
   const isQj = mode === "qj";
 
-  const handleExport = () => {
-    if (filtered.length === 0) return;
+  const buildSheetData = (modeType: "qj" | "dc") => {
+    const isQ = modeType === "qj";
+    const label = isQ ? "期交" : "趸交";
     const columns: ExportColumn[] = [
       { header: "银行", key: "bank", width: 14 },
       { header: "网点名称", key: "name", width: 20 },
       { header: "简称", key: "shortName", width: 14 },
       { header: "部门经理", key: "deptManager", width: 10 },
       { header: "客户经理", key: "customerManager", width: 10 },
-      { header: isQj ? "期交" : "趸交", key: "premium", type: "number", width: 14 },
+      { header: label, key: "premium", type: "number", width: 14 },
       { header: "件数", key: "js", type: "number", width: 10 },
-      { header: isQj ? "期交目标" : "趸交目标", key: "target", type: "number", width: 14 },
+      { header: `${label}目标`, key: "target", type: "number", width: 14 },
       { header: "完成率", key: "completionStr", width: 10 },
+      { header: "差距", key: "gap", type: "number", width: 14 },
     ];
-    const exportData = filtered.map((n: any) => ({
-      bank: n.bank,
-      name: n.name,
-      shortName: n.shortName || "",
-      deptManager: n.deptManager,
-      customerManager: n.customerManager,
-      premium: isQj ? n.qj : n.dc,
-      js: n.js,
-      target: isQj ? n.qjTarget : n.dcTarget,
-      completionStr: (isQj ? n.qjTarget : n.dcTarget) > 0
-        ? ((isQj ? n.qj : n.dc) / (isQj ? n.qjTarget : n.dcTarget) * 100).toFixed(1) + "%"
-        : "-",
-    }));
-    exportToExcel({ columns, data: exportData, fileName: `网点业绩_${isQj ? "期交" : "趸交"}` });
+    const allRows = [...networkPerformance].sort((a: any, b: any) =>
+      isQ ? b.qj - a.qj : b.dc - a.dc
+    );
+    const exportData = allRows.map((n: any) => {
+      const premium = isQ ? n.qj : n.dc;
+      const tgt = isQ ? n.qjTarget : n.dcTarget;
+      return {
+        bank: n.bank,
+        name: n.name,
+        shortName: n.shortName || "",
+        deptManager: n.deptManager,
+        customerManager: n.customerManager,
+        premium,
+        js: n.js,
+        target: tgt,
+        completionStr: tgt > 0 ? ((premium / tgt) * 100).toFixed(1) + "%" : "-",
+        gap: tgt > 0 ? premium - tgt : 0,
+      };
+    });
+    const totalBaofei = allRows.reduce((s: number, n: any) => s + (isQ ? n.qj : n.dc), 0);
+    const totalJs = allRows.reduce((s: number, n: any) => s + n.js, 0);
+    const totalTarget = allRows.reduce((s: number, n: any) => s + (isQ ? n.qjTarget : n.dcTarget), 0);
+    const totalRowData: any = {
+      bank: "合计",
+      name: "",
+      shortName: "",
+      deptManager: "",
+      customerManager: "",
+      premium: totalBaofei,
+      js: totalJs,
+      target: totalTarget,
+      completionStr: totalTarget > 0 ? ((totalBaofei / totalTarget) * 100).toFixed(1) + "%" : "-",
+      gap: totalTarget > 0 ? totalBaofei - totalTarget : 0,
+    };
+    return { columns, exportData, totalRowData };
+  };
+
+  const handleExport = () => {
+    const qjSheet = buildSheetData("qj");
+    const dcSheet = buildSheetData("dc");
+    exportToExcel({
+      fileName: "网点业绩明细",
+      sheets: [
+        { name: "期交", columns: qjSheet.columns, data: qjSheet.exportData, totalRow: qjSheet.totalRowData, totalLabel: "合计" },
+        { name: "趸交", columns: dcSheet.columns, data: dcSheet.exportData, totalRow: dcSheet.totalRowData, totalLabel: "合计" },
+      ],
+    });
   };
 
   return (
     <div className="p-4 space-y-3">
-      {/* 筛选栏 */}
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-xs text-muted-foreground">
           网点业绩明细（{isQj ? "期交" : "趸交"}）
         </p>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <ExportButton onClick={handleExport} />
-          {/* 银行渠道筛选 */}
           <select
             className="text-xs border border-border rounded px-2 py-1.5 bg-background"
             value={bankFilter}
@@ -102,7 +130,6 @@ export default function NetworkPerfTab() {
               <option key={b} value={b}>{b}</option>
             ))}
           </select>
-          {/* 营业部筛选 */}
           <select
             className="text-xs border border-border rounded px-2 py-1.5 bg-background"
             value={deptFilter}
@@ -113,7 +140,6 @@ export default function NetworkPerfTab() {
               <option key={d} value={d}>{d}</option>
             ))}
           </select>
-          {/* 期交/趸交切换 */}
           <div className="inline-flex rounded-lg border border-border overflow-hidden text-xs">
             <button
               className={`px-3 py-1.5 transition-colors ${
@@ -139,7 +165,6 @@ export default function NetworkPerfTab() {
         </div>
       </div>
 
-      {/* 统计徽章（可点击筛选） */}
       <div className="flex gap-2 text-xs">
         <button
           className={`px-2 py-1 rounded transition-colors cursor-pointer ${
@@ -147,7 +172,7 @@ export default function NetworkPerfTab() {
               ? "bg-blue-500 text-white ring-2 ring-blue-300"
               : "bg-blue-100 text-blue-700 hover:bg-blue-200"
           }`}
-          onClick={() => setStatusFilter(statusFilter === "all" ? "all" : "all")}
+          onClick={() => setStatusFilter("all")}
         >
           共 {networkPerformance.filter((n: any) =>
             (bankFilter === "all" || n.bank === bankFilter) &&
@@ -254,7 +279,6 @@ export default function NetworkPerfTab() {
                     </tr>
                   );
                 })}
-                {/* 合计行 */}
                 <tr className={totalRow}>
                   <td className={tdCls}></td>
                   <td className={tdCls} colSpan={4}><strong>合计</strong></td>

@@ -21,7 +21,8 @@ export function generateDeptData(
   lookups: LookupTables,
   monthStart: number,
   monthEnd: number,
-  dailyRows: DataRow[] = []
+  dailyRows: DataRow[] = [],
+  resignedNames: Set<string> = new Set()
 ): Record<string, any> {
   // Get dept list from targets
   const deptNames: string[] = [];
@@ -32,10 +33,10 @@ export function generateDeptData(
       deptSet.add(name);
     }
   }
-  // Also add depts from HR that may not be in targets
+  // Also add depts from HR that may not be in targets, but skip resigned managers
   for (const hr of hrRows) {
     const d = safeStr(hr['营业部']);
-    if (d && !deptSet.has(d)) {
+    if (d && !deptSet.has(d) && !resignedNames.has(d)) {
       deptNames.push(d);
       deptSet.add(d);
     }
@@ -218,10 +219,23 @@ export function generateDeptData(
     mgrNetworkStats[person][wdName].amount += aj;
   }
 
+  // 从人网数据中构建每个客户经理分配的所有网点
+  const mgrAssignedNetworks: Record<string, Set<string>> = {};
+  const networkBankMap: Record<string, string> = {}; // 网点名称 -> 银行名称
+  for (const nr of netRows) {
+    const cmName = safeStr(nr['客户经理姓名']);
+    const agencyName = safeStr(nr['代理机构名称']);
+    const bankName = safeStr(nr['总行名称']);
+    if (!cmName || !agencyName) continue;
+    if (!mgrAssignedNetworks[cmName]) mgrAssignedNetworks[cmName] = new Set();
+    mgrAssignedNetworks[cmName].add(agencyName);
+    if (agencyName && bankName) networkBankMap[agencyName] = bankName;
+  }
+
   const hrManagerDetails: Array<{
     dept: string; name: string; code: string;
     qjbf: number; js: number; kaidan: boolean;
-    networks: Array<{ wdName: string; js: number; amount: number }>;
+    networks: Array<{ wdName: string; bankName: string; js: number; amount: number }>;
   }> = [];
   for (const hr of hrRows) {
     const dept = safeStr(hr['营业部']);
@@ -229,10 +243,27 @@ export function generateDeptData(
     const code = safeStr(hr['工号']);
     const qjbf = safeFloat(hr['期交保费']);
     const jsCount = safeFloat(hr['件数']);
-    // 获取该经理各网点的开单明细
+    // 获取该经理的出单网点数据
     const netStats = mgrNetworkStats[name] || {};
-    const networks = Object.entries(netStats)
-      .map(([wdName, stat]) => ({ wdName, js: stat.js, amount: stat.amount }))
+    // 获取人网分配的所有网点
+    const assignedNets = mgrAssignedNetworks[name] || new Set<string>();
+    // 合并：以人网分配的网点为基础，补充出单数据
+    const networkMap = new Map<string, { wdName: string; bankName: string; js: number; amount: number }>();
+    // 先加入所有人网分配的网点（保费默认为0）
+    for (const wdName of assignedNets) {
+      networkMap.set(wdName, { wdName, bankName: networkBankMap[wdName] || '', js: 0, amount: 0 });
+    }
+    // 再合并出单数据（覆盖有业绩的网点，同时保留不在人网中但有出单的网点）
+    for (const [wdName, stat] of Object.entries(netStats)) {
+      const existing = networkMap.get(wdName);
+      if (existing) {
+        existing.js = stat.js;
+        existing.amount = stat.amount;
+      } else {
+        networkMap.set(wdName, { wdName, bankName: networkBankMap[wdName] || '', js: stat.js, amount: stat.amount });
+      }
+    }
+    const networks = Array.from(networkMap.values())
       .sort((a, b) => b.amount - a.amount);
     hrManagerDetails.push({
       dept,

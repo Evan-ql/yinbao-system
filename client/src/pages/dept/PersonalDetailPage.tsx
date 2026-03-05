@@ -33,12 +33,25 @@ export default function PersonalDetailPage() {
   const [searchText, setSearchText] = useState("");
   const [expandedPerson, setExpandedPerson] = useState<string | null>(null);
 
-  // 从 dataSource 中聚合数据：客户经理 → 网点 → 月份
+  // 从 dataSource + 人网数据中聚合数据：客户经理 → 网点 → 月份
   const personDetails = useMemo(() => {
     if (!reportData?.dataSource) return [];
     const ds = reportData.dataSource;
+    const netRows = reportData.network || [];
 
-    // 聚合结构：person → network → month → { premium, count }
+    // 1. 从人网数据中构建每个客户经理分配的所有网点
+    const assignedNetworks = new Map<string, Map<string, string>>(); // cm -> (agencyName -> bankName)
+    for (const nr of netRows) {
+      const cmName = ((nr["客户经理姓名"] || "") as string).trim();
+      const agencyName = ((nr["代理机构名称"] || "") as string).trim();
+      const bankName = ((nr["总行名称"] || "") as string).trim();
+      const deptMgr = ((nr["营业部经理姓名"] || "") as string).trim();
+      if (!cmName || !agencyName) continue;
+      if (!assignedNetworks.has(cmName)) assignedNetworks.set(cmName, new Map());
+      assignedNetworks.get(cmName)!.set(agencyName, bankName);
+    }
+
+    // 2. 从保单数据中聚合业绩
     const personMap = new Map<
       string,
       {
@@ -63,7 +76,6 @@ export default function PersonalDetailPage() {
       const bankName = ((row["银行总行"]) as string || "").trim();
       const deptManager = ((row["营业部经理名称"]) as string || "").trim();
 
-      // 只统计期交（价值类年交）
       const isQj = type === "价值类" && interval === "年交";
       if (!isQj) continue;
 
@@ -86,7 +98,30 @@ export default function PersonalDetailPage() {
       monthData.count += 1;
     }
 
-    // 转换为数组
+    // 3. 合并人网分配的网点（没出单的也显示）
+    for (const [cmName, netMap] of assignedNetworks) {
+      if (!personMap.has(cmName)) {
+        // 这个人完全没有出单数据，但人网中有分配网点
+        // 从人网中获取营业部经理名称
+        let deptMgr = "";
+        for (const nr of netRows) {
+          if (((nr["客户经理姓名"] || "") as string).trim() === cmName) {
+            deptMgr = ((nr["营业部经理姓名"] || "") as string).trim();
+            break;
+          }
+        }
+        personMap.set(cmName, { deptManager: deptMgr, networks: new Map() });
+      }
+      const person = personMap.get(cmName)!;
+      for (const [agencyName, bankName] of netMap) {
+        if (!person.networks.has(agencyName)) {
+          // 人网有但没出单的网点，加入并显示保费为0
+          person.networks.set(agencyName, { bankName, months: new Map() });
+        }
+      }
+    }
+
+    // 4. 转换为数组
     const result: PersonDetail[] = [];
     for (const [name, data] of personMap) {
       const networks: NetworkMonthly[] = [];
@@ -184,7 +219,7 @@ export default function PersonalDetailPage() {
         data.push(row);
       }
     }
-    exportToExcel({ columns, data, fileName: "个人详情" });
+    exportToExcel({ columns, data, fileName: "个人详情", mergeKeys: ["name", "deptManager"] });
   };
 
   const controls = (

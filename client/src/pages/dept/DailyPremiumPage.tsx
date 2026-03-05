@@ -13,11 +13,36 @@ export default function DailyPremiumPage() {
   const handleExport = () => {
     if (!dailyData || dailyData.length === 0) return;
     const columns: ExportColumn[] = [
-      { header: "日期", key: "date", width: 12 },
-      { header: "当日保费", key: "daily", type: "number", width: 14 },
-      { header: "累计保费", key: "cumulative", type: "number", width: 14 },
+      { header: "营业部", key: "name", width: 14 },
+      { header: "今日期交", key: "todayQj", type: "number", width: 14 },
+      { header: "非邮期交", key: "todayFeiyouQj", type: "number", width: 14 },
+      { header: "今日趸交", key: "todayDc", type: "number", width: 14 },
+      { header: "底线目标", key: "target", type: "number", width: 14 },
+      { header: "达成率", key: "rateStr", width: 10 },
     ];
-    exportToExcel({ columns, data: dailyData, fileName: "日保费数据" });
+    const data = dailyData.map((d: any) => ({
+      ...d,
+      rateStr: d.rate > 0 ? (d.rate * 100).toFixed(0) + "%" : "0",
+    }));
+    const totalQj = dailyData.reduce((s: number, d: any) => s + d.todayQj, 0);
+    const totalFeiyouQj = dailyData.reduce((s: number, d: any) => s + d.todayFeiyouQj, 0);
+    const totalDc = dailyData.reduce((s: number, d: any) => s + d.todayDc, 0);
+    const totalTarget = dailyData.reduce((s: number, d: any) => s + d.target, 0);
+    const totalRateStr = totalTarget > 0 ? ((totalQj / totalTarget) * 100).toFixed(0) + "%" : "0";
+    exportToExcel({
+      columns,
+      data,
+      fileName: "日保费数据",
+      totalRow: {
+        name: "中支合计",
+        todayQj: totalQj,
+        todayFeiyouQj: totalFeiyouQj,
+        todayDc: totalDc,
+        target: totalTarget,
+        rateStr: totalRateStr,
+      },
+      totalLabel: "中支合计",
+    });
   };
 
   return (

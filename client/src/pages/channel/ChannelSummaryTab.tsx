@@ -20,18 +20,18 @@ export default function ChannelSummaryTab() {
   const rows = mode === "qj" ? channelSummary : (channelSummaryDc || []);
   const totals = mode === "qj" ? channelSummaryTotals : (channelSummaryDcTotals || {});
 
-  const handleExport = () => {
-    if (!rows || rows.length === 0) return;
-    const columns: ExportColumn[] = [
-      { header: "银行渠道", key: "name", width: 18 },
-      { header: "保费", key: "baofei", type: "number", width: 14 },
-      { header: "渠道占比", key: "ratioStr", width: 10 },
-      { header: "网点数量", key: "netTotal", type: "number", width: 10 },
-      { header: "开单网点", key: "netActive", type: "number", width: 10 },
-      { header: "网活率", key: "netActiveRateStr", width: 10 },
-      { header: "网均产量", key: "netAvgOutput", type: "number", width: 14 },
-    ];
-    const exportData = rows.map((c: any) => ({
+  const buildColumns = (): ExportColumn[] => [
+    { header: "银行渠道", key: "name", width: 18 },
+    { header: "保费", key: "baofei", type: "number", width: 14 },
+    { header: "渠道占比", key: "ratioStr", width: 10 },
+    { header: "网点数量", key: "netTotal", type: "number", width: 10 },
+    { header: "开单网点", key: "netActive", type: "number", width: 10 },
+    { header: "网活率", key: "netActiveRateStr", width: 10 },
+    { header: "网均产量", key: "netAvgOutput", type: "number", width: 14 },
+  ];
+
+  const buildData = (srcRows: any[], srcTotals: any) => {
+    const exportData = srcRows.map((c: any) => ({
       name: c.name,
       baofei: c.baofei,
       ratioStr: (c.ratio * 100).toFixed(1) + "%",
@@ -40,7 +40,29 @@ export default function ChannelSummaryTab() {
       netActiveRateStr: (c.netActiveRate * 100).toFixed(1) + "%",
       netAvgOutput: Math.round(c.netAvgOutput),
     }));
-    exportToExcel({ columns, data: exportData, fileName: `渠道业务数据_${mode === "qj" ? "年交" : "趸交"}` });
+    const totalRowData = {
+      name: "中支合计",
+      baofei: srcTotals.baofei,
+      ratioStr: "100%",
+      netTotal: srcTotals.netTotal,
+      netActive: srcTotals.netActive,
+      netActiveRateStr: (srcTotals.netActiveRate * 100).toFixed(1) + "%",
+      netAvgOutput: Math.round(srcTotals.netAvgOutput),
+    };
+    return { exportData, totalRowData };
+  };
+
+  const handleExport = () => {
+    const columns = buildColumns();
+    const qjData = buildData(channelSummary || [], channelSummaryTotals || {});
+    const dcData = buildData(channelSummaryDc || [], channelSummaryDcTotals || {});
+    exportToExcel({
+      fileName: "渠道业务数据",
+      sheets: [
+        { name: "年交", columns, data: qjData.exportData, totalRow: qjData.totalRowData, totalLabel: "中支合计" },
+        { name: "趸交", columns, data: dcData.exportData, totalRow: dcData.totalRowData, totalLabel: "中支合计" },
+      ],
+    });
   };
 
   return (

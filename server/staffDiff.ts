@@ -1,6 +1,12 @@
 /**
  * 人事结构三方交叉对比引擎
- * [v1.0.3] 系统现有组织架构 vs 人网数据 vs 2026数据
+ * [v2.0.0] 系统现有组织架构 vs 人网数据 vs 2026数据
+ *
+ * 改进：
+ * - 新增 'resigned'（疑似离职）：系统有但人网和2026数据都没有
+ * - 新增 'transferred'（调岗）：上级发生变更
+ * - inactive 项默认建议标记离职
+ * - 更清晰的差异描述
  *
  * 上传任一数据时自动触发对比，不限制上传顺序。
  * 对比结果供前端展示，用户确认后才更新组织架构。
@@ -43,10 +49,12 @@ export interface DiffItem {
   source: PersonSource | null;   // 2026数据
   // 差异类型
   diffType: 'consistent'   // 三方一致
-    | 'conflict'           // 存在冲突（上级不同）
+    | 'conflict'           // 存在冲突（上级不同，非调岗）
+    | 'transferred'        // 调岗（上级发生变更，有明确新上级）
     | 'missing_parent'     // 2026数据中上级为空
     | 'new_person'         // 新增人员（系统中没有）
-    | 'inactive'           // 系统中有但数据中未出现
+    | 'resigned'           // 疑似离职（系统有，人网和2026都没有）
+    | 'inactive'           // 系统中有但部分数据中未出现（仍在人网或仍有保单）
     | 'renwang_only';      // 仅人网中有
   diffDescription: string; // 差异描述
   // 用户操作
@@ -60,9 +68,12 @@ export interface DiffResult {
   totalItems: number;
   consistentCount: number;
   conflictCount: number;
+  transferredCount: number;
   missingCount: number;
   newCount: number;
+  resignedCount: number;
   inactiveCount: number;
+  latestMonth: number;       // 数据中的最新月份
   items: DiffItem[];
 }
 
@@ -223,6 +234,8 @@ function extractFromSystem(): Map<string, PersonSource> {
 
   // 按人员聚合（同一人可能有多条月份记录）
   for (const s of staffList) {
+    // 只对比在职人员
+    if (s.status === 'resigned') continue;
     const key = `${s.role}|${s.name}`;
     const ex = result.get(key);
     if (ex) {
@@ -269,6 +282,17 @@ export function compareThreeWay(
   const sourceMap = sourceBuffer ? extractFromSource(sourceBuffer) : new Map<string, PersonSource>();
   const renwangMap = renwangBuffer ? extractFromRenwang(renwangBuffer) : new Map<string, PersonSource>();
 
+  const hasSource = sourceMap.size > 0;
+  const hasRenwang = renwangMap.size > 0;
+
+  // 计算2026数据中的最新月份
+  let latestMonth = 0;
+  for (const p of sourceMap.values()) {
+    for (const m of p.months) {
+      if (m > latestMonth) latestMonth = m;
+    }
+  }
+
   // 收集所有人员 key
   const allKeys = new Set<string>();
   for (const k of systemMap.keys()) allKeys.add(k);
@@ -278,8 +302,10 @@ export function compareThreeWay(
   const items: DiffItem[] = [];
   let consistentCount = 0;
   let conflictCount = 0;
+  let transferredCount = 0;
   let missingCount = 0;
   let newCount = 0;
+  let resignedCount = 0;
   let inactiveCount = 0;
 
   for (const key of allKeys) {
@@ -293,8 +319,20 @@ export function compareThreeWay(
 
     // 总监没有上级，跳过上级对比
     if (role === 'director') {
-      // 总监只检查是否新增或消失
-      if (!sys && (src || rw)) {
+      if (!sys && src && !rw) {
+        // 总监仅在2026数据中有，人网没有 → 疑似已离职
+        items.push({
+          id: genDiffId(), name, code, role, roleLabel,
+          system: sys, renwang: rw, source: src,
+          diffType: 'resigned',
+          diffDescription: `${roleLabel} ${name} 仅在历史保单数据中出现，人网中已不存在，疑似已离职`,
+          suggestedParent: '',
+          confirmedParent: '',
+          action: 'modify',
+        });
+        resignedCount++;
+      } else if (!sys && (src || rw)) {
+        // 新增总监（人网中有）
         items.push({
           id: genDiffId(), name, code, role, roleLabel,
           system: sys, renwang: rw, source: src,
@@ -305,22 +343,34 @@ export function compareThreeWay(
           action: 'accept',
         });
         newCount++;
-      }
-      // 总监在系统中有但数据中都没有
-      else if (sys && !src && !rw) {
+      } else if (sys && !src && !rw) {
+        // 总监在系统中有但数据中都没有 → 疑似离职
+        items.push({
+          id: genDiffId(), name, code, role, roleLabel,
+          system: sys, renwang: rw, source: src,
+          diffType: 'resigned',
+          diffDescription: `${roleLabel} ${name} 在人网和业务数据中均未出现，疑似已离职`,
+          suggestedParent: sys.parent,
+          confirmedParent: '',
+          action: 'modify', // 默认建议标记离职
+        });
+        resignedCount++;
+      } else if (sys && !rw && src) {
+        // 总监在系统和2026数据中有，但人网没有
         items.push({
           id: genDiffId(), name, code, role, roleLabel,
           system: sys, renwang: rw, source: src,
           diffType: 'inactive',
-          diffDescription: `${roleLabel} ${name} 在上传数据中未出现`,
+          diffDescription: `${roleLabel} ${name} 在人网中未出现，但仍有业务数据`,
           suggestedParent: sys.parent,
           confirmedParent: '',
           action: 'accept',
         });
         inactiveCount++;
-      }
-      // 一致
-      else {
+      } else if (sys && rw && !src) {
+        // 总监在系统和人网中有，但2026数据没有 → 正常（可能只是没出单）
+        consistentCount++;
+      } else {
         consistentCount++;
       }
       continue;
@@ -334,29 +384,33 @@ export function compareThreeWay(
     let diffType: DiffItem['diffType'] = 'consistent';
     let desc = '';
     let suggested = '';
+    let defaultAction: DiffItem['action'] = 'accept';
 
     const inSystem = !!sys;
     const inSource = !!src;
     const inRenwang = !!rw;
 
     if (!inSystem && !inSource && inRenwang) {
-      // 仅人网中有
+      // 仅人网中有 → 新增人员
       diffType = 'renwang_only';
       desc = `${roleLabel} ${name} 仅在人网数据中存在，上级：${rwParent || '无'}`;
       suggested = rwParent;
       newCount++;
     } else if (!inSystem && inSource && !inRenwang) {
-      // 仅2026数据中有
-      diffType = 'new_person';
-      desc = `新增${roleLabel}：${name}，数据中上级：${srcParent || '空'}`;
+      // 系统没有 + 人网没有 + 仅2026数据有 → 疑似已离职（仅历史保单中存在）
+      const srcMonthsR = src?.months || [];
+      const monthHintR = srcMonthsR.length > 0 ? `（出单月份：${srcMonthsR.join('、')}月）` : '';
+      diffType = 'resigned';
+      desc = `${roleLabel} ${name} 仅在历史保单数据中出现${monthHintR}，人网中已不存在，疑似已离职（原上级：${srcParent || '无'}）`;
       suggested = srcParent;
-      newCount++;
+      defaultAction = 'modify'; // 默认建议标记离职
+      resignedCount++;
     } else if (!inSystem && inSource && inRenwang) {
-      // 人网和2026都有，系统没有
+      // 人网和2026都有，系统没有 → 新增
       if (srcParent && rwParent && srcParent !== rwParent) {
         diffType = 'conflict';
         desc = `新增${roleLabel} ${name}，人网上级：${rwParent}，数据上级：${srcParent}，两者不一致`;
-        suggested = rwParent; // 默认建议用人网
+        suggested = rwParent;
         conflictCount++;
       } else {
         diffType = 'new_person';
@@ -365,53 +419,66 @@ export function compareThreeWay(
         newCount++;
       }
     } else if (inSystem && !inSource && !inRenwang) {
-      // 系统有但两份数据都没有
-      diffType = 'inactive';
-      desc = `${roleLabel} ${name}（上级：${sysParent}）在上传数据中均未出现`;
+      // ★ 系统有但两份数据都没有 → 疑似离职
+      diffType = 'resigned';
+      desc = `${roleLabel} ${name}（现上级：${sysParent}）在人网和业务数据中均未出现，疑似已离职`;
       suggested = sysParent;
-      inactiveCount++;
+      defaultAction = 'modify'; // 默认建议标记离职
+      resignedCount++;
     } else if (inSystem && inSource && !inRenwang) {
       // 系统有，2026有，人网没有
-      if (!srcParent) {
+      const srcMonths = src?.months || [];
+      const notInLatest = latestMonth > 0 && !srcMonths.includes(latestMonth);
+      const monthHint = srcMonths.length > 0 ? `（出单月份：${srcMonths.join('、')}月）` : '';
+
+      if (notInLatest) {
+        // 人网没有 + 最新月份无数据 → 疑似离职
+        diffType = 'resigned';
+        desc = `${roleLabel} ${name} 人网中已不存在，且${latestMonth}月无业务数据${monthHint}，疑似已离职（原上级：${sysParent}）`;
+        suggested = sysParent;
+        defaultAction = 'modify';
+        resignedCount++;
+      } else if (!srcParent) {
         diffType = 'missing_parent';
-        desc = `${roleLabel} ${name} 在2026数据中上级为空，系统现有上级：${sysParent}`;
+        desc = `${roleLabel} ${name} 在2026数据中上级为空，系统现有上级：${sysParent}${monthHint}`;
         suggested = sysParent;
         missingCount++;
       } else if (srcParent !== sysParent && sysParent) {
-        diffType = 'conflict';
-        desc = `${roleLabel} ${name} 上级不一致 — 系统：${sysParent}，2026数据：${srcParent}`;
-        suggested = srcParent; // 默认建议用最新数据
-        conflictCount++;
+        // 上级变更 → 调岗
+        diffType = 'transferred';
+        desc = `${roleLabel} ${name} 疑似调岗 — 原上级：${sysParent} → 新上级：${srcParent}（人网中未出现）${monthHint}`;
+        suggested = srcParent;
+        transferredCount++;
       } else {
         consistentCount++;
-        continue; // 一致，不加入列表
+        continue;
       }
     } else if (inSystem && !inSource && inRenwang) {
       // 系统有，人网有，2026没有
       if (rwParent !== sysParent && rwParent && sysParent) {
-        diffType = 'conflict';
-        desc = `${roleLabel} ${name} 上级不一致 — 系统：${sysParent}，人网：${rwParent}`;
+        // 人网上级与系统不同 → 调岗
+        diffType = 'transferred';
+        desc = `${roleLabel} ${name} 疑似调岗 — 原上级：${sysParent} → 人网上级：${rwParent}`;
         suggested = rwParent;
-        conflictCount++;
+        transferredCount++;
       } else {
         consistentCount++;
         continue;
       }
     } else if (inSystem && inSource && inRenwang) {
       // 三方都有
-      const allSame = (!sysParent && !srcParent && !rwParent)
-        || (sysParent === srcParent && sysParent === rwParent)
-        || (sysParent === srcParent && !rwParent)
-        || (sysParent === rwParent && !srcParent)
-        || (!sysParent && srcParent === rwParent);
+      const srcMonths3 = src?.months || [];
+      const notInLatest3 = latestMonth > 0 && !srcMonths3.includes(latestMonth);
+      const monthHint3 = srcMonths3.length > 0 ? `（出单月份：${srcMonths3.join('、')}月）` : '';
 
       if (!srcParent && sysParent) {
         // 2026数据缺失上级
         if (rwParent && rwParent !== sysParent) {
-          diffType = 'conflict';
-          desc = `${roleLabel} ${name} 2026数据上级为空，系统：${sysParent}，人网：${rwParent}`;
+          // 人网上级与系统不同 → 调岗
+          diffType = 'transferred';
+          desc = `${roleLabel} ${name} 疑似调岗 — 原上级：${sysParent} → 人网上级：${rwParent}（2026数据上级为空）`;
           suggested = rwParent;
-          conflictCount++;
+          transferredCount++;
         } else {
           diffType = 'missing_parent';
           desc = `${roleLabel} ${name} 在2026数据中上级为空，系统/人网上级：${sysParent || rwParent}`;
@@ -420,22 +487,43 @@ export function compareThreeWay(
         }
       } else if (srcParent && rwParent && srcParent !== rwParent) {
         // 人网和2026冲突
-        diffType = 'conflict';
-        desc = `${roleLabel} ${name} 人网上级：${rwParent}，2026数据上级：${srcParent}` +
-          (sysParent && sysParent !== srcParent && sysParent !== rwParent ? `，系统现有：${sysParent}` : '');
-        suggested = srcParent; // 默认用最新保单数据
-        conflictCount++;
+        if (srcParent === sysParent) {
+          // 2026和系统一致，人网不同 → 人网调岗
+          diffType = 'transferred';
+          desc = `${roleLabel} ${name} 疑似调岗 — 系统/数据上级：${sysParent} → 人网上级：${rwParent}`;
+          suggested = rwParent; // 建议用人网（最新）
+          transferredCount++;
+        } else if (rwParent === sysParent) {
+          // 人网和系统一致，2026不同 → 2026数据调岗
+          diffType = 'transferred';
+          desc = `${roleLabel} ${name} 疑似调岗 — 原上级：${sysParent} → 数据上级：${srcParent}`;
+          suggested = srcParent;
+          transferredCount++;
+        } else {
+          // 三方都不同
+          diffType = 'conflict';
+          desc = `${roleLabel} ${name} 上级三方不一致 — 系统：${sysParent}，人网：${rwParent}，数据：${srcParent}`;
+          suggested = rwParent; // 默认用人网
+          conflictCount++;
+        }
       } else if (srcParent && sysParent && srcParent !== sysParent) {
-        // 2026数据与系统冲突（人网一致或空）
-        diffType = 'conflict';
-        desc = `${roleLabel} ${name} 上级变动 — 系统：${sysParent} → 2026数据：${srcParent}`;
+        // 2026数据与系统冲突（人网一致或空）→ 调岗
+        diffType = 'transferred';
+        desc = `${roleLabel} ${name} 疑似调岗 — 原上级：${sysParent} → 新上级：${srcParent}`;
         suggested = srcParent;
-        conflictCount++;
+        transferredCount++;
       } else if (rwParent && sysParent && rwParent !== sysParent && !srcParent) {
-        diffType = 'conflict';
-        desc = `${roleLabel} ${name} 上级不一致 — 系统：${sysParent}，人网：${rwParent}`;
+        // 人网与系统不同 → 调岗
+        diffType = 'transferred';
+        desc = `${roleLabel} ${name} 疑似调岗 — 原上级：${sysParent} → 人网上级：${rwParent}`;
         suggested = rwParent;
-        conflictCount++;
+        transferredCount++;
+      } else if (notInLatest3) {
+        // 三方上级一致，但最新月份无业务数据 → 提示关注
+        diffType = 'inactive';
+        desc = `${roleLabel} ${name} ${latestMonth}月无业务数据${monthHint3}，人网仍在（上级：${sysParent}）`;
+        suggested = sysParent;
+        inactiveCount++;
       } else {
         // 一致
         consistentCount++;
@@ -452,25 +540,28 @@ export function compareThreeWay(
       diffType, diffDescription: desc,
       suggestedParent: suggested,
       confirmedParent: '',
-      action: 'accept',
+      action: defaultAction,
     });
   }
 
-  // 按重要性排序：conflict > missing > new > inactive > renwang_only
+  // 按重要性排序：resigned > transferred > conflict > missing > new > renwang_only > inactive
   const typeOrder: Record<string, number> = {
-    conflict: 0, missing_parent: 1, new_person: 2, renwang_only: 3, inactive: 4, consistent: 5,
+    resigned: 0, transferred: 1, conflict: 2, missing_parent: 3, new_person: 4, renwang_only: 5, inactive: 6, consistent: 7,
   };
   items.sort((a, b) => (typeOrder[a.diffType] ?? 9) - (typeOrder[b.diffType] ?? 9));
 
   const totalItems = items.length;
   return {
-    hasChanges: conflictCount > 0 || missingCount > 0 || newCount > 0 || inactiveCount > 0,
+    hasChanges: resignedCount > 0 || transferredCount > 0 || conflictCount > 0 || missingCount > 0 || newCount > 0 || inactiveCount > 0,
     totalItems,
     consistentCount,
     conflictCount,
+    transferredCount,
     missingCount,
     newCount,
+    resignedCount,
     inactiveCount,
+    latestMonth,
     items,
   };
 }

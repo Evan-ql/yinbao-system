@@ -23,19 +23,34 @@ export default function MonthlyTrendTab() {
   const totals = mode === "qj" ? monthlyTrendTotals : (monthlyTrendDcTotals || {});
   const grandTotal = mode === "qj" ? monthlyGrandTotal : (monthlyGrandTotalDc || 0);
 
-  const handleExport = () => {
-    if (!rows || rows.length === 0) return;
-    const columns: ExportColumn[] = [
-      { header: "银行渠道", key: "name", width: 18 },
-      ...MONTHS.map(m => ({ header: `${m}月`, key: `m${m}`, type: "number" as const, width: 10 })),
-      { header: "合计", key: "total", type: "number", width: 14 },
-    ];
-    const exportData = rows.map((row: any) => {
+  const buildColumns = (): ExportColumn[] => [
+    { header: "银行渠道", key: "name", width: 18 },
+    ...MONTHS.map(m => ({ header: `${m}月`, key: `m${m}`, type: "number" as const, width: 10 })),
+    { header: "合计", key: "total", type: "number", width: 14 },
+  ];
+
+  const buildData = (srcRows: any[], srcTotals: any, srcGrandTotal: number) => {
+    const exportData = srcRows.map((row: any) => {
       const r: any = { name: row.name, total: row.total };
       MONTHS.forEach(m => { r[`m${m}`] = row.months[m] || 0; });
       return r;
     });
-    exportToExcel({ columns, data: exportData, fileName: `月度趋势_${mode === "qj" ? "年交" : "趸交"}` });
+    const totalRowData: any = { name: "合计", total: srcGrandTotal };
+    MONTHS.forEach(m => { totalRowData[`m${m}`] = srcTotals[m] || 0; });
+    return { exportData, totalRowData };
+  };
+
+  const handleExport = () => {
+    const columns = buildColumns();
+    const qjData = buildData(monthlyTrend || [], monthlyTrendTotals || {}, monthlyGrandTotal || 0);
+    const dcData = buildData(monthlyTrendDc || [], monthlyTrendDcTotals || {}, monthlyGrandTotalDc || 0);
+    exportToExcel({
+      fileName: "月度趋势",
+      sheets: [
+        { name: "年交", columns, data: qjData.exportData, totalRow: qjData.totalRowData, totalLabel: "合计" },
+        { name: "趸交", columns, data: dcData.exportData, totalRow: dcData.totalRowData, totalLabel: "合计" },
+      ],
+    });
   };
 
   return (

@@ -14,7 +14,7 @@ import { syncFromTemplate, syncFromRenwang } from './syncSettings';
 import { scanStaffFromSource, fillMissingAttribution, extractStaffTrack } from './staffScanner';
 import { compareThreeWay, DiffResult, DiffItem } from './staffDiff';
 import { onStaffChanged, getSettingsData, updateSettings } from './settingsApi';
-import { generateExcelBuffer } from './exportExcel';
+import { generateZipBuffer } from './exportExcel';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -877,8 +877,8 @@ router.post('/staff-diff/confirm', async (req: Request, res: Response) => {
           });
           changeCount++;
         }
-      } else if (item.diffType === 'conflict' || item.diffType === 'missing_parent') {
-        // 更新上级归属
+      } else if (item.diffType === 'transferred') {
+        // 调岗：更新上级归属
         const existing = settings.staff.find(
           (s: any) => s.name === item.name && s.role === item.role && s.status === 'active'
         );
@@ -886,7 +886,6 @@ router.post('/staff-diff/confirm', async (req: Request, res: Response) => {
           existing.parentId = finalParent;
           changeCount++;
         } else {
-          // 如果系统中没有，新增
           settings.staff.push({
             id: String(Date.now() + Math.random()),
             name: item.name,
@@ -898,23 +897,91 @@ router.post('/staff-diff/confirm', async (req: Request, res: Response) => {
           });
           changeCount++;
         }
-      } else if (item.diffType === 'inactive') {
-        // 用户确认保留或标记离职
+      } else if (item.diffType === 'conflict' || item.diffType === 'missing_parent') {
+        // 更新上级归属
+        const existing = settings.staff.find(
+          (s: any) => s.name === item.name && s.role === item.role && s.status === 'active'
+        );
+        if (existing) {
+          existing.parentId = finalParent;
+          changeCount++;
+        } else {
+          settings.staff.push({
+            id: String(Date.now() + Math.random()),
+            name: item.name,
+            code: item.code || '',
+            role: item.role as any,
+            parentId: finalParent,
+            status: 'active',
+            month: 0,
+          });
+          changeCount++;
+        }
+      } else if (item.diffType === 'resigned') {
+        // 疑似离职：action=modify 标记离职，action=accept 保留
+        const existing = settings.staff.find(
+          (s: any) => s.name === item.name && s.role === item.role && s.status === 'active'
+        );
+        // 计算离职月份：最后出单月份+1，或数据最新月份
+        const sourceMonths = item.source?.months || [];
+        const lastActiveMonth = sourceMonths.length > 0 ? Math.max(...sourceMonths) : 0;
+        const resignedMonth = lastActiveMonth > 0 ? lastActiveMonth + 1 : (pendingStaffDiff?.latestMonth || 0);
         if (item.action === 'modify') {
-          // 标记为离职
+          if (existing) {
+            existing.status = 'resigned';
+            existing.resignedMonth = resignedMonth;
+            changeCount++;
+          } else {
+            // 系统中不存在（可能之前被误删或仅历史保单中有），加入并标记为resigned
+            settings.staff.push({
+              id: String(Date.now() + Math.random()),
+              name: item.name,
+              code: item.code || '',
+              role: item.role as any,
+              parentId: item.suggestedParent || '',
+              status: 'resigned',
+              resignedMonth: resignedMonth,
+              month: 0,
+            });
+            changeCount++;
+          }
+        } else if (item.action === 'accept') {
+          // 用户选择保留，如果系统中不存在则加入
+          if (!existing) {
+            settings.staff.push({
+              id: String(Date.now() + Math.random()),
+              name: item.name,
+              code: item.code || '',
+              role: item.role as any,
+              parentId: finalParent,
+              status: 'active',
+              month: 0,
+            });
+            changeCount++;
+          }
+        }
+      } else if (item.diffType === 'inactive') {
+        // 未出现：action=modify 标记离职，action=accept 保留
+        if (item.action === 'modify') {
           const existing = settings.staff.find(
             (s: any) => s.name === item.name && s.role === item.role && s.status === 'active'
           );
           if (existing) {
+            const sourceMonths = item.source?.months || [];
+            const lastActiveMonth = sourceMonths.length > 0 ? Math.max(...sourceMonths) : 0;
+            const resignedMonth = lastActiveMonth > 0 ? lastActiveMonth + 1 : (pendingStaffDiff?.latestMonth || 0);
             existing.status = 'resigned';
+            existing.resignedMonth = resignedMonth;
             changeCount++;
           }
         }
-        // accept = 保留不变
       }
     }
 
     // 保存设置
+    // 注意：不再从 deptTargets 中直接移除离职的营业部经理
+    // 因为报表生成时会根据 monthEnd 和 resignedMonth 动态判断是否显示
+    // 这样离职人员在职月份的数据仍然保留
     if (changeCount > 0) {
       updateSettings(s => {
         s.staff = settings.staff;
@@ -963,18 +1030,18 @@ router.get('/staff-track/:name', async (req: Request, res: Response) => {
   }
 });
 
-// ── 总表导出 ──
+// ── 总表导出（ZIP包含所有报表Excel文件） ──
 router.get('/export-excel', async (_req: Request, res: Response) => {
   try {
     if (!cachedReport) {
       return res.status(400).json({ error: '暂无报表数据，请先上传数据' });
     }
-    const buf = generateExcelBuffer(cachedReport);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="report.xlsx"');
+    const buf = await generateZipBuffer(cachedReport);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="report.zip"');
     res.send(buf);
   } catch (error: any) {
-    console.error('[Export] Failed to export Excel:', error);
+    console.error('[Export] Failed to export ZIP:', error);
     res.status(500).json({ error: error.message || '导出失败' });
   }
 });

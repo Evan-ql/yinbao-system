@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import DeptSubPageWrapper from "@/components/DeptSubPageWrapper";
 import { fmt, pct, thCls, tdCls, monoR, rowHover, totalRow } from "@/components/dept/tableStyles";
-import { exportToExcel, ExportColumn } from "@/lib/exportExcel";
+import { exportToExcel, ExportColumn, ExportSheet } from "@/lib/exportExcel";
 import ExportButton from "@/components/ExportButton";
 
 type Level = "director" | "deptManager" | "customerManager" | "dept" | "network";
@@ -36,7 +36,6 @@ const LEVEL_MAP = Object.fromEntries(LEVELS.map(l => [l.key, l]));
 export default function TargetAchievementPage() {
   const { reportData, monthStart, monthEnd } = useReport();
   const [level, setLevel] = useState<Level>("director");
-  const [selectedMonth, setSelectedMonth] = useState<number>(0);
 
   // 目标数据
   const [directorTargets, setDirectorTargets] = useState<any[]>([]);
@@ -65,83 +64,64 @@ export default function TargetAchievementPage() {
     });
   }, []);
 
-  // 通用目标查找函数
+  // 通用目标查找函数（使用全局月份范围汇总）
   const findTarget = (targets: any[], nameField: string, name: string): { qj: number; dc: number } => {
     const matched = targets.filter(t => t[nameField] === name);
     if (matched.length === 0) return { qj: 0, dc: 0 };
-    if (selectedMonth > 0) {
-      const mt = matched.find((t: any) => Number(t.month) === selectedMonth);
-      if (mt) return { qj: Number(mt.qjTarget) || 0, dc: Number(mt.dcTarget) || 0 };
-      const yt = matched.find((t: any) => Number(t.month) === 0);
-      if (yt) return { qj: (Number(yt.qjTarget) || 0) / 12, dc: (Number(yt.dcTarget) || 0) / 12 };
-      return { qj: 0, dc: 0 };
-    } else {
-      // 汇总视图：把所有已设置的月份目标加起来
-      let tqj = 0, tdc = 0;
-      const yearTarget = matched.find((t: any) => Number(t.month) === 0);
-      const monthTargets = matched.filter((t: any) => Number(t.month) > 0);
-      if (monthTargets.length > 0) {
-        // 有按月设置的目标，汇总所有月份目标
-        for (const mt of monthTargets) {
-          tqj += Number(mt.qjTarget) || 0;
-          tdc += Number(mt.dcTarget) || 0;
-        }
-      } else if (yearTarget) {
-        // 只有全年目标，按月份范围折算
-        const months = monthEnd - monthStart + 1;
-        tqj = ((Number(yearTarget.qjTarget) || 0) / 12) * months;
-        tdc = ((Number(yearTarget.dcTarget) || 0) / 12) * months;
+    // 汇总视图：把所有已设置的月份目标加起来
+    let tqj = 0, tdc = 0;
+    const yearTarget = matched.find((t: any) => Number(t.month) === 0);
+    const monthTargets = matched.filter((t: any) => Number(t.month) > 0);
+    if (monthTargets.length > 0) {
+      for (const mt of monthTargets) {
+        tqj += Number(mt.qjTarget) || 0;
+        tdc += Number(mt.dcTarget) || 0;
       }
-      return { qj: tqj, dc: tdc };
+    } else if (yearTarget) {
+      const months = monthEnd - monthStart + 1;
+      tqj = ((Number(yearTarget.qjTarget) || 0) / 12) * months;
+      tdc = ((Number(yearTarget.dcTarget) || 0) / 12) * months;
     }
+    return { qj: tqj, dc: tdc };
   };
 
-  // 聚合数据
-  const achievements = useMemo(() => {
-    if (!reportData?.dataSource) return [];
-    const ds = reportData.dataSource;
-
-    const filteredDs = ds.filter((row: any) => {
-      const m = row["月"];
-      if (m === null || m === undefined) return false;
-      if (selectedMonth > 0) return m === selectedMonth;
-      return m >= monthStart && m <= monthEnd;
-    });
-
-    // 获取有效人员列表（按月份过滤，优先使用具体月份记录，否则使用全年默认记录）
-    const getEffectiveStaff = (role: string) => {
-      const roleStaff = staffList.filter((s: any) => s.role === role);
-      const byName = new Map<string, any>();
-      for (const s of roleStaff) {
-        const existing = byName.get(s.name);
-        if (!existing) {
+  // 获取有效人员列表
+  const getEffectiveStaff = (role: string) => {
+    const roleStaff = staffList.filter((s: any) => s.role === role);
+    const byName = new Map<string, any>();
+    for (const s of roleStaff) {
+      const existing = byName.get(s.name);
+      if (!existing) {
+        byName.set(s.name, s);
+      } else {
+        const targetMonth = monthEnd;
+        const sMonth = Number(s.month) || 0;
+        const existMonth = Number(existing.month) || 0;
+        if (sMonth > 0 && sMonth <= targetMonth && (existMonth === 0 || sMonth > existMonth)) {
           byName.set(s.name, s);
-        } else {
-          // 如果当前选择了月份，优先使用该月份的记录
-          const targetMonth = selectedMonth > 0 ? selectedMonth : monthEnd;
-          const sMonth = Number(s.month) || 0;
-          const existMonth = Number(existing.month) || 0;
-          // 选择最接近且不超过目标月份的记录
-          if (sMonth > 0 && sMonth <= targetMonth && (existMonth === 0 || sMonth > existMonth)) {
-            byName.set(s.name, s);
-          }
         }
       }
-      // 过滤掉离职和调岗的人员
-      return Array.from(byName.values()).filter((s: any) => s.status === 'active');
-    };
+    }
+    return Array.from(byName.values()).filter((s: any) => s.status === 'active');
+  };
 
+  // 构建id->name映射
+  const staffIdMap: Record<string, string> = useMemo(() => {
+    const map: Record<string, string> = {};
+    staffList.forEach((s: any) => { map[s.id] = s.name; });
+    return map;
+  }, [staffList]);
+
+  // 通用聚合函数
+  const aggregate = (
+    levelKey: Level,
+    filteredDs: any[],
+  ): AchievementRow[] => {
     const staffDirectors = getEffectiveStaff("director");
     const staffManagers = getEffectiveStaff("deptManager");
     const staffCMs = getEffectiveStaff("customerManager");
-    // 构建id->name映射（使用全部staffList）
-    const staffIdMap: Record<string, string> = {};
-    staffList.forEach((s: any) => { staffIdMap[s.id] = s.name; });
 
-    // [v1.0.3] 不再自动补全人员归属，改为人工维护
-
-    // 聚合函数
-    const aggregate = (
+    const doAggregate = (
       getKey: (row: any) => string,
       getParent: ((row: any) => string) | null,
       getExtra: ((row: any) => string) | null,
@@ -171,14 +151,12 @@ export default function TargetAchievementPage() {
       }
 
       const allNames = new Set<string>();
-      // 从组织架构补充完整人员名单
       if (staffNames) {
         staffNames.forEach(s => allNames.add(s.name));
       }
       targets.forEach(t => allNames.add(t[nameField]));
       Object.keys(actualMap).forEach(n => allNames.add(n));
 
-      // 构建组织架构的parent映射
       const staffParentMap: Record<string, string> = {};
       if (staffNames) {
         staffNames.forEach(s => { if (s.parent) staffParentMap[s.name] = s.parent; });
@@ -213,16 +191,16 @@ export default function TargetAchievementPage() {
       return rows;
     };
 
-    switch (level) {
+    switch (levelKey) {
       case "director":
-        return aggregate(
+        return doAggregate(
           r => (r["营业区总监"] || "").trim(),
           null, null,
           directorTargets, "name", undefined,
           staffDirectors.map(s => ({ name: s.name }))
         );
       case "deptManager":
-        return aggregate(
+        return doAggregate(
           r => (r["营业部经理名称"] || "").trim(),
           r => (r["营业区总监"] || "").trim(),
           null,
@@ -230,7 +208,7 @@ export default function TargetAchievementPage() {
           staffManagers.map(s => ({ name: s.name, parent: staffIdMap[s.parentId] || "" }))
         );
       case "customerManager":
-        return aggregate(
+        return doAggregate(
           r => (r["业绩归属客户经理姓名"] || "").trim(),
           r => (r["营业部经理名称"] || "").trim(),
           null,
@@ -238,14 +216,14 @@ export default function TargetAchievementPage() {
           staffCMs.map(s => ({ name: s.name, parent: staffIdMap[s.parentId] || "" }))
         );
       case "dept":
-        return aggregate(
+        return doAggregate(
           r => (r["营业部经理名称"] || "").trim(),
           null, null,
           deptTargets, "deptName", undefined,
           staffManagers.map(s => ({ name: s.name }))
         );
       case "network":
-        return aggregate(
+        return doAggregate(
           r => (r["业绩归属网点名称"] || "").trim(),
           r => (r["营业部经理名称"] || "").trim(),
           r => (r["银行总行"] || "").trim(),
@@ -254,7 +232,23 @@ export default function TargetAchievementPage() {
       default:
         return [];
     }
-  }, [reportData, level, directorTargets, deptManagerTargets, customerManagerTargets, deptTargets, networkTargets, staffList, selectedMonth, monthStart, monthEnd]);
+  };
+
+  // 过滤数据源
+  const filteredDs = useMemo(() => {
+    if (!reportData?.dataSource) return [];
+    return reportData.dataSource.filter((row: any) => {
+      const m = row["月"];
+      if (m === null || m === undefined) return false;
+      return m >= monthStart && m <= monthEnd;
+    });
+  }, [reportData, monthStart, monthEnd]);
+
+  // 当前level的聚合数据
+  const achievements = useMemo(() => {
+    if (filteredDs.length === 0 && !reportData?.dataSource) return [];
+    return aggregate(level, filteredDs);
+  }, [filteredDs, level, directorTargets, deptManagerTargets, customerManagerTargets, deptTargets, networkTargets, staffList, staffIdMap, monthStart, monthEnd]);
 
   // 合计
   const totals = useMemo(() => {
@@ -269,15 +263,6 @@ export default function TargetAchievementPage() {
       { qjTarget: 0, qjActual: 0, dcTarget: 0, dcActual: 0, count: 0 }
     );
   }, [achievements]);
-
-  // 月份选项
-  const monthOptions = useMemo(() => {
-    const opts = [{ value: 0, label: `${monthStart}-${monthEnd}月汇总` }];
-    for (let m = monthStart; m <= monthEnd; m++) {
-      opts.push({ value: m, label: `${m}月` });
-    }
-    return opts;
-  }, [monthStart, monthEnd]);
 
   // 是否显示父级列
   const showParent = level === "deptManager" || level === "customerManager" || level === "network";
@@ -301,26 +286,32 @@ export default function TargetAchievementPage() {
 
   const colSpanName = 2 + (showParent ? 1 : 0) + (showExtra ? 1 : 0);
 
-  const handleExport = () => {
-    if (achievements.length === 0) return;
+  // 为某个level构建导出columns和data
+  const buildExportData = (levelKey: Level, rows: AchievementRow[]) => {
+    const lvl = LEVEL_MAP[levelKey];
+    const hasParent = levelKey === "deptManager" || levelKey === "customerManager" || levelKey === "network";
+    const hasExtra = levelKey === "network";
+    const pLabel = levelKey === "deptManager" ? "所属总监" : levelKey === "customerManager" ? "所属经理" : levelKey === "network" ? "营业部经理" : "";
+
     const cols: ExportColumn[] = [
       { header: "序号", key: "idx", width: 8 },
-      { header: LEVEL_MAP[level].label, key: "name", width: 14 },
+      { header: lvl.label, key: "name", width: 14 },
     ];
-    if (showExtra) cols.push({ header: "银行渠道", key: "extra", width: 14 });
-    if (showParent) cols.push({ header: parentLabel, key: "parent", width: 14 });
+    if (hasExtra) cols.push({ header: "银行渠道", key: "extra", width: 14 });
+    if (hasParent) cols.push({ header: pLabel, key: "parent", width: 14 });
     cols.push(
       { header: "期交目标", key: "qjTarget", type: "number", width: 14 },
       { header: "期交完成", key: "qjActual", type: "number", width: 14 },
-      { header: "期交完成率", key: "qjPctStr", width: 10 },
-      { header: "期交差距", key: "qjGap", type: "number", width: 14 },
+      { header: "完成率", key: "qjPctStr", width: 10 },
+      { header: "差距", key: "qjGap", type: "number", width: 14 },
       { header: "趸交目标", key: "dcTarget", type: "number", width: 14 },
       { header: "趸交完成", key: "dcActual", type: "number", width: 14 },
-      { header: "趸交完成率", key: "dcPctStr", width: 10 },
-      { header: "趸交差距", key: "dcGap", type: "number", width: 14 },
+      { header: "完成率", key: "dcPctStr", width: 10 },
+      { header: "差距", key: "dcGap", type: "number", width: 14 },
       { header: "件数", key: "count", type: "number", width: 10 },
     );
-    const data = achievements.map((r, i) => ({
+
+    const data = rows.map((r, i) => ({
       idx: i + 1,
       name: r.name,
       extra: r.extra || "",
@@ -335,7 +326,56 @@ export default function TargetAchievementPage() {
       dcGap: r.dcGap,
       count: r.count,
     }));
-    exportToExcel({ columns: cols, data, fileName: `目标达成_${LEVEL_MAP[level].label}` });
+
+    // 合计行
+    const t = rows.reduce(
+      (acc, row) => ({
+        qjTarget: acc.qjTarget + row.qjTarget,
+        qjActual: acc.qjActual + row.qjActual,
+        dcTarget: acc.dcTarget + row.dcTarget,
+        dcActual: acc.dcActual + row.dcActual,
+        count: acc.count + row.count,
+      }),
+      { qjTarget: 0, qjActual: 0, dcTarget: 0, dcActual: 0, count: 0 }
+    );
+    const total: Record<string, any> = {
+      name: "合计",
+      extra: "",
+      parent: "",
+      qjTarget: t.qjTarget,
+      qjActual: t.qjActual,
+      qjPctStr: t.qjTarget > 0 ? ((t.qjActual / t.qjTarget) * 100).toFixed(1) + "%" : "-",
+      qjGap: t.qjTarget - t.qjActual,
+      dcTarget: t.dcTarget,
+      dcActual: t.dcActual,
+      dcPctStr: t.dcTarget > 0 ? ((t.dcActual / t.dcTarget) * 100).toFixed(1) + "%" : "-",
+      dcGap: t.dcTarget - t.dcActual,
+      count: t.count,
+    };
+
+    return { cols, data, total };
+  };
+
+  const handleExport = () => {
+    // 为所有5个维度生成数据并导出为5个Sheet
+    const sheets: ExportSheet[] = [];
+    for (const lvl of LEVELS) {
+      const rows = aggregate(lvl.key, filteredDs);
+      const { cols, data, total } = buildExportData(lvl.key, rows);
+      sheets.push({
+        sheetName: lvl.label,
+        title: `目标达成（${lvl.label}）`,
+        columns: cols,
+        data,
+        totalRow: total,
+        totalLabel: "合计",
+      });
+    }
+    exportToExcel({
+      columns: [],
+      fileName: "目标达成",
+      sheets,
+    });
   };
 
   const controls = (
@@ -356,15 +396,6 @@ export default function TargetAchievementPage() {
           </button>
         ))}
       </div>
-      <select
-        value={selectedMonth}
-        onChange={(e) => setSelectedMonth(Number(e.target.value))}
-        className="px-2 py-1.5 rounded border border-border text-xs bg-background"
-      >
-        {monthOptions.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
     </div>
   );
 

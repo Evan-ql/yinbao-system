@@ -180,9 +180,12 @@ export default function SourceDataPage() {
         >
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>
-            检测到 <strong>{staffDiff.totalItems}</strong> 项人事结构差异（冲突 {staffDiff.conflictCount}，缺失 {staffDiff.missingCount}，新增 {staffDiff.newCount}）
+            检测到 <strong>{staffDiff.totalItems}</strong> 项人事变动
+            {(staffDiff as any).resignedCount > 0 && <strong className="text-red-600 ml-1">（{(staffDiff as any).resignedCount}人疑似离职）</strong>}
+            {(staffDiff as any).transferredCount > 0 && <strong className="text-purple-600 ml-1">（{(staffDiff as any).transferredCount}人调岗）</strong>}
+            {staffDiff.newCount > 0 && <span className="ml-1">新增 {staffDiff.newCount}</span>}
           </span>
-          <span className="ml-auto text-xs underline">查看并确认</span>
+          <span className="ml-auto text-xs underline font-medium">立即确认</span>
         </button>
       )}
 
