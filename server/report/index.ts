@@ -72,10 +72,13 @@ export function processReport(
     }
   }
   // 双重检查：如果 deptTargets 中的人在 staff 中完全不存在（被删除而非标记resigned），也移除
-  for (const [name] of lookups.deptTargets) {
-    if (!staffNameSet.has(name)) {
-      resignedNames.add(name);
-      console.log(`[Report] Dept manager '${name}' not found in staff, will be removed from targets`);
+  // 但仅当 staff 列表非空时才执行此检查（空 staff 表示尚未配置，不应移除所有人）
+  if (staffNameSet.size > 0) {
+    for (const [name] of lookups.deptTargets) {
+      if (!staffNameSet.has(name)) {
+        resignedNames.add(name);
+        console.log(`[Report] Dept manager '${name}' not found in staff, will be removed from targets`);
+      }
     }
   }
   if (resignedNames.size > 0) {
