@@ -2,6 +2,8 @@ import { useState, useMemo, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import { fmt, thCls, tdCls, monoR, rowHover } from "@/components/dept/tableStyles";
+import ExportButton from "@/components/ExportButton";
+import { exportToExcel } from "@/lib/exportExcel";
 
 /** 解析约定比例输入：支持 "1:3"、"3"、"1/3" 格式，返回除数 */
 function parseRatio(input: string): number {
@@ -20,6 +22,12 @@ function parseRatio(input: string): number {
   const num = parseFloat(s);
   if (!isNaN(num) && num !== 0) return num;
   return 1;
+}
+
+/** 万元格式化（用于导出） */
+function fmtWan(v: number): number {
+  if (v === 0) return 0;
+  return Math.round(v / 10000 * 10) / 10;
 }
 
 interface DetailRow {
@@ -141,12 +149,93 @@ export default function InsuranceCalcTab() {
       .sort((a: DetailRow, b: DetailRow) => b.premium - a.premium);
   }, [detailRows, checkedProducts, selectedBank, visibleProducts]);
 
+  // 导出功能
+  const handleExport = useCallback(() => {
+    // Sheet1: 险种汇总
+    const summaryColumns = [
+      { header: "序号", key: "idx", width: 6, type: "number" as const },
+      { header: "险种", key: "xz", width: 35 },
+      { header: "新约保费(万)", key: "premium", width: 14, type: "number" as const },
+      { header: "约定比例", key: "ratio", width: 12 },
+      { header: "比例后金额(万)", key: "adjusted", width: 16, type: "number" as const },
+    ];
+    const summaryData = visibleProducts
+      .filter((p: string) => checkedProducts[p])
+      .map((prod: string, i: number) => {
+        const premium = productPremiums[prod] || 0;
+        const ratio = getEffectiveRatio(prod);
+        return {
+          idx: i + 1,
+          xz: prod,
+          premium: fmtWan(premium),
+          ratio: ratio !== 1 ? `1:${ratio}` : "-",
+          adjusted: fmtWan(premium / ratio),
+        };
+      });
+    const summaryTotal = {
+      idx: "",
+      xz: "合计（已选）",
+      premium: fmtWan(totalPremium),
+      ratio: "",
+      adjusted: fmtWan(totalAdjusted),
+    };
+
+    // Sheet2: 业务明细
+    const detailColumns = [
+      { header: "序号", key: "idx", width: 6, type: "number" as const },
+      { header: "险种", key: "xz", width: 35 },
+      { header: "总行", key: "bank", width: 18 },
+      { header: "支行", key: "branch", width: 18 },
+      { header: "网点", key: "wd", width: 30 },
+      { header: "新约保费(万)", key: "premium", width: 14, type: "number" as const },
+      { header: "保单号", key: "bdh", width: 22 },
+      { header: "缴费间隔", key: "jfjg", width: 10 },
+      { header: "缴费期间", key: "jfqn", width: 10 },
+      { header: "签单日期", key: "signDate", width: 12 },
+      { header: "保单状态", key: "status", width: 10 },
+      { header: "客户经理", key: "ywymc", width: 12 },
+    ];
+    const detailData = filteredDetails.map((row: DetailRow, i: number) => ({
+      idx: i + 1,
+      xz: row.xz,
+      bank: row.bank || "-",
+      branch: row.branch || "-",
+      wd: row.wd || "-",
+      premium: fmtWan(row.premium / getEffectiveRatio(row.xz)),
+      bdh: row.bdh || "-",
+      jfjg: row.jfjg || "-",
+      jfqn: row.jfqn || "-",
+      signDate: row.signDate || "-",
+      status: row.status || "-",
+      ywymc: row.ywymc || "-",
+    }));
+
+    exportToExcel({
+      fileName: "险种计算器",
+      sheets: [
+        {
+          sheetName: "险种汇总",
+          columns: summaryColumns,
+          data: summaryData,
+          totalRow: summaryTotal,
+          totalLabel: "合计（已选）",
+        },
+        {
+          sheetName: "业务明细",
+          columns: detailColumns,
+          data: detailData,
+        },
+      ],
+    });
+  }, [visibleProducts, checkedProducts, productPremiums, getEffectiveRatio, totalPremium, totalAdjusted, filteredDetails]);
+
   return (
     <div className="p-4 space-y-4">
       {/* 顶部筛选区域 */}
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-xs text-muted-foreground">险种计算器</p>
         <div className="ml-auto flex flex-wrap items-center gap-3">
+          <ExportButton onClick={handleExport} />
           <select
             className="text-xs border border-border rounded px-2 py-1.5 bg-background"
             value={selectedBank}
