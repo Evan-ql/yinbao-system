@@ -297,6 +297,7 @@ export default function InsuranceCalcTab() {
                     <th className={thCls} style={{ width: 45 }}>序号</th>
                     <th className={thCls}>险种</th>
                     <th className={thCls}>总行</th>
+                    <th className={thCls}>支行</th>
                     <th className={thCls}>网点</th>
                     <th className={thCls}>新约保费</th>
                     <th className={thCls}>保单号</th>
@@ -313,6 +314,7 @@ export default function InsuranceCalcTab() {
                       <td className={tdCls}>{i + 1}</td>
                       <td className={tdCls}>{row.xz}</td>
                       <td className={tdCls}>{row.bank || "-"}</td>
+                      <td className={tdCls}>{row.branch || "-"}</td>
                       <td className={tdCls}>{row.wd || "-"}</td>
                       <td className={`${tdCls} ${monoR}`}>{fmt(row.premium)}</td>
                       <td className={tdCls}>{row.bdh || "-"}</td>
