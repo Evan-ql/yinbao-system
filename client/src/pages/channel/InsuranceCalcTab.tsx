@@ -1,14 +1,39 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { useReport } from "@/contexts/ReportContext";
 import { fmt, thCls, tdCls, monoR, rowHover } from "@/components/dept/tableStyles";
 
+/** 解析约定比例输入：支持 "1:3"、"3"、"1/3" 格式，返回除数 */
+function parseRatio(input: string): number {
+  const s = input.trim();
+  if (!s) return 1;
+  if (s.includes(":")) {
+    const right = parseFloat(s.split(":")[1]);
+    if (!isNaN(right) && right !== 0) return right;
+    return 1;
+  }
+  if (s.includes("/")) {
+    const right = parseFloat(s.split("/")[1]);
+    if (!isNaN(right) && right !== 0) return right;
+    return 1;
+  }
+  const num = parseFloat(s);
+  if (!isNaN(num) && num !== 0) return num;
+  return 1;
+}
+
 export default function InsuranceCalcTab() {
   const { reportData } = useReport();
   const data = reportData?.channel;
-  const [selectedProduct, setSelectedProduct] = useState<string>("all");
   const [selectedBank, setSelectedBank] = useState<string>("all");
-  const [ratioInput, setRatioInput] = useState<string>("");
+  // 每个险种的勾选状态：key=险种名，value=是否选中
+  const [checkedProducts, setCheckedProducts] = useState<Record<string, boolean>>({});
+  // 每个险种的约定比例输入：key=险种名，value=输入字符串
+  const [ratioInputs, setRatioInputs] = useState<Record<string, string>>({});
+  // 全局默认比例（用于未单独设置的险种）
+  const [defaultRatioInput, setDefaultRatioInput] = useState<string>("");
+  // 是否已初始化勾选状态
+  const [initialized, setInitialized] = useState(false);
 
   if (!data) return <div className="p-4 text-sm text-muted-foreground">请先导入数据</div>;
 
@@ -17,74 +42,85 @@ export default function InsuranceCalcTab() {
 
   const { products = [], banks = [], premiumMap = {} } = insuranceCalcData;
 
-  // 解析约定比例：支持 "1:3"、"3"、"1/3" 格式
-  const ratioValue = useMemo(() => {
-    const input = ratioInput.trim();
-    if (!input) return 1;
-    // 格式 1:N
-    if (input.includes(":")) {
-      const parts = input.split(":");
-      const right = parseFloat(parts[1]);
-      if (!isNaN(right) && right !== 0) return right;
-      return 1;
-    }
-    // 格式 1/N
-    if (input.includes("/")) {
-      const parts = input.split("/");
-      const right = parseFloat(parts[1]);
-      if (!isNaN(right) && right !== 0) return right;
-      return 1;
-    }
-    // 纯数字
-    const num = parseFloat(input);
-    if (!isNaN(num) && num !== 0) return num;
-    return 1;
-  }, [ratioInput]);
+  // 初始化：默认全部勾选
+  if (!initialized && products.length > 0) {
+    const initial: Record<string, boolean> = {};
+    for (const p of products) initial[p] = true;
+    setCheckedProducts(initial);
+    setInitialized(true);
+  }
 
-  // 计算汇总表格数据
-  const tableData = useMemo(() => {
-    const rows: Array<{ product: string; bank: string; premium: number; adjusted: number }> = [];
-
-    const filteredProducts = selectedProduct === "all" ? products : [selectedProduct];
+  // 计算每个险种在当前银行筛选下的保费
+  const productPremiums = useMemo(() => {
+    const result: Record<string, number> = {};
     const filteredBanks = selectedBank === "all" ? banks : [selectedBank];
-
-    for (const prod of filteredProducts) {
+    for (const prod of products) {
+      let total = 0;
       for (const bank of filteredBanks) {
-        const premium = premiumMap[prod]?.[bank] || 0;
-        if (premium !== 0) {
-          rows.push({
-            product: prod,
-            bank: bank,
-            premium,
-            adjusted: premium / ratioValue,
-          });
-        }
+        total += premiumMap[prod]?.[bank] || 0;
       }
+      result[prod] = total;
     }
+    return result;
+  }, [selectedBank, products, banks, premiumMap]);
 
-    rows.sort((a, b) => b.premium - a.premium);
-    return rows;
-  }, [selectedProduct, selectedBank, products, banks, premiumMap, ratioValue]);
+  // 按保费降序排列的险种列表
+  const sortedProducts = useMemo(() => {
+    return [...products].sort((a: string, b: string) => (productPremiums[b] || 0) - (productPremiums[a] || 0));
+  }, [products, productPremiums]);
 
-  const totalPremium = tableData.reduce((s, r) => s + r.premium, 0);
-  const totalAdjusted = tableData.reduce((s, r) => s + r.adjusted, 0);
+  // 全选/全不选
+  const allChecked = sortedProducts.length > 0 && sortedProducts.every((p: string) => checkedProducts[p]);
+  const someChecked = sortedProducts.some((p: string) => checkedProducts[p]);
+
+  const toggleAll = useCallback(() => {
+    const newState: Record<string, boolean> = {};
+    const targetState = !allChecked;
+    for (const p of products) newState[p] = targetState;
+    setCheckedProducts(newState);
+  }, [allChecked, products]);
+
+  const toggleProduct = useCallback((product: string) => {
+    setCheckedProducts(prev => ({ ...prev, [product]: !prev[product] }));
+  }, []);
+
+  const updateRatio = useCallback((product: string, value: string) => {
+    setRatioInputs(prev => ({ ...prev, [product]: value }));
+  }, []);
+
+  // 获取某个险种的有效比例（优先用单独设置，否则用默认）
+  const getEffectiveRatio = useCallback((product: string): number => {
+    const individual = ratioInputs[product]?.trim();
+    if (individual) return parseRatio(individual);
+    if (defaultRatioInput.trim()) return parseRatio(defaultRatioInput);
+    return 1;
+  }, [ratioInputs, defaultRatioInput]);
+
+  const defaultRatioValue = parseRatio(defaultRatioInput);
+
+  // 计算汇总数据（仅勾选的险种）
+  const { totalPremium, totalAdjusted, checkedCount } = useMemo(() => {
+    let premium = 0;
+    let adjusted = 0;
+    let count = 0;
+    for (const prod of sortedProducts) {
+      if (!checkedProducts[prod]) continue;
+      const p = productPremiums[prod] || 0;
+      if (p === 0) continue;
+      const ratio = getEffectiveRatio(prod);
+      premium += p;
+      adjusted += p / ratio;
+      count++;
+    }
+    return { totalPremium: premium, totalAdjusted: adjusted, checkedCount: count };
+  }, [sortedProducts, checkedProducts, productPremiums, getEffectiveRatio]);
 
   return (
     <div className="p-4 space-y-4">
-      {/* 筛选区域 */}
+      {/* 顶部筛选区域 */}
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-xs text-muted-foreground">险种计算器</p>
         <div className="ml-auto flex flex-wrap items-center gap-3">
-          <select
-            className="text-xs border border-border rounded px-2 py-1.5 bg-background"
-            value={selectedProduct}
-            onChange={(e) => setSelectedProduct(e.target.value)}
-          >
-            <option value="all">全部险种</option>
-            {products.map((p: string) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
           <select
             className="text-xs border border-border rounded px-2 py-1.5 bg-background"
             value={selectedBank}
@@ -96,16 +132,16 @@ export default function InsuranceCalcTab() {
             ))}
           </select>
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-muted-foreground whitespace-nowrap">约定比例</span>
+            <span className="text-xs text-muted-foreground whitespace-nowrap">默认比例</span>
             <input
               type="text"
               className="text-xs border border-border rounded px-2 py-1.5 bg-background w-20 text-center"
               placeholder="如 1:3"
-              value={ratioInput}
-              onChange={(e) => setRatioInput(e.target.value)}
+              value={defaultRatioInput}
+              onChange={(e) => setDefaultRatioInput(e.target.value)}
             />
-            {ratioInput.trim() && ratioValue !== 1 && (
-              <span className="text-xs text-muted-foreground">÷ {ratioValue}</span>
+            {defaultRatioInput.trim() && defaultRatioValue !== 1 && (
+              <span className="text-xs text-muted-foreground">÷ {defaultRatioValue}</span>
             )}
           </div>
         </div>
@@ -115,70 +151,101 @@ export default function InsuranceCalcTab() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground mb-1">新约保费合计</p>
+            <p className="text-xs text-muted-foreground mb-1">已选险种保费合计</p>
             <p className="text-xl font-bold text-primary">{fmt(totalPremium)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground mb-1">
-              约定比例后金额
-              {ratioInput.trim() && ratioValue !== 1 && (
-                <span className="ml-1 text-muted-foreground">（÷ {ratioValue}）</span>
-              )}
-            </p>
+            <p className="text-xs text-muted-foreground mb-1">约定比例后金额合计</p>
             <p className="text-xl font-bold text-green-600">{fmt(totalAdjusted)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground mb-1">匹配记录数</p>
-            <p className="text-xl font-bold">{tableData.length}</p>
+            <p className="text-xs text-muted-foreground mb-1">已选险种数 / 总险种数</p>
+            <p className="text-xl font-bold">{checkedCount} / {sortedProducts.filter((p: string) => (productPremiums[p] || 0) > 0).length}</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* 明细表格 */}
+      {/* 险种列表表格 */}
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr>
-                  <th className={thCls}>序号</th>
-                  <th className={thCls}>险种</th>
-                  <th className={thCls}>总行</th>
-                  <th className={thCls}>新约保费</th>
-                  <th className={thCls}>
-                    约定比例后
-                    {ratioInput.trim() && ratioValue !== 1 && (
-                      <span className="font-normal text-muted-foreground ml-1">（÷{ratioValue}）</span>
-                    )}
+                  <th className={thCls} style={{ width: 40 }}>
+                    <input
+                      type="checkbox"
+                      checked={allChecked}
+                      ref={(el) => { if (el) el.indeterminate = someChecked && !allChecked; }}
+                      onChange={toggleAll}
+                      className="cursor-pointer"
+                    />
                   </th>
+                  <th className={thCls} style={{ width: 50 }}>序号</th>
+                  <th className={thCls}>险种</th>
+                  <th className={thCls}>新约保费</th>
+                  <th className={thCls} style={{ width: 120 }}>约定比例</th>
+                  <th className={thCls}>比例后金额</th>
                 </tr>
               </thead>
               <tbody>
-                {tableData.length === 0 ? (
+                {sortedProducts.filter((p: string) => (productPremiums[p] || 0) > 0).length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="text-center py-8 text-muted-foreground">
+                    <td colSpan={6} className="text-center py-8 text-muted-foreground">
                       暂无匹配数据
                     </td>
                   </tr>
                 ) : (
                   <>
-                    {tableData.map((row, i) => (
-                      <tr key={`${row.product}-${row.bank}`} className={rowHover}>
-                        <td className={tdCls}>{i + 1}</td>
-                        <td className={tdCls}>{row.product}</td>
-                        <td className={tdCls}>{row.bank}</td>
-                        <td className={`${tdCls} ${monoR}`}>{fmt(row.premium)}</td>
-                        <td className={`${tdCls} ${monoR} font-semibold text-green-600`}>{fmt(row.adjusted)}</td>
-                      </tr>
-                    ))}
+                    {sortedProducts
+                      .filter((p: string) => (productPremiums[p] || 0) > 0)
+                      .map((prod: string, i: number) => {
+                        const premium = productPremiums[prod] || 0;
+                        const isChecked = !!checkedProducts[prod];
+                        const individualInput = ratioInputs[prod] || "";
+                        const effectiveRatio = getEffectiveRatio(prod);
+                        const adjusted = premium / effectiveRatio;
+                        return (
+                          <tr
+                            key={prod}
+                            className={`${rowHover} ${!isChecked ? "opacity-40" : ""}`}
+                          >
+                            <td className={tdCls}>
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => toggleProduct(prod)}
+                                className="cursor-pointer"
+                              />
+                            </td>
+                            <td className={tdCls}>{i + 1}</td>
+                            <td className={tdCls}>{prod}</td>
+                            <td className={`${tdCls} ${monoR}`}>{fmt(premium)}</td>
+                            <td className={tdCls}>
+                              <input
+                                type="text"
+                                className="text-xs border border-border rounded px-1.5 py-1 bg-background w-full text-center"
+                                placeholder={defaultRatioInput.trim() || "1:3"}
+                                value={individualInput}
+                                onChange={(e) => updateRatio(prod, e.target.value)}
+                              />
+                            </td>
+                            <td className={`${tdCls} ${monoR} font-semibold ${isChecked ? "text-green-600" : ""}`}>
+                              {fmt(adjusted)}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     <tr className="bg-muted/50 font-semibold border-t-2 border-border">
                       <td className={tdCls}></td>
-                      <td className={tdCls} colSpan={2}><strong>合计</strong></td>
+                      <td className={tdCls}></td>
+                      <td className={tdCls}><strong>合计（已选）</strong></td>
                       <td className={`${tdCls} ${monoR}`}><strong>{fmt(totalPremium)}</strong></td>
+                      <td className={tdCls}></td>
                       <td className={`${tdCls} ${monoR} text-green-600`}><strong>{fmt(totalAdjusted)}</strong></td>
                     </tr>
                   </>
