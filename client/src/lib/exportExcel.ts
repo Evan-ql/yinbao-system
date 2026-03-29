@@ -306,7 +306,7 @@ export function exportToExcel(
   let mergeKeys: string[] | undefined;
 
   // 判断调用方式
-  if (arg1 && !Array.isArray(arg1) && typeof arg1 === "object" && "columns" in arg1) {
+  if (arg1 && !Array.isArray(arg1) && typeof arg1 === "object" && ("columns" in arg1 || "sheets" in arg1)) {
     // 对象形式: exportToExcel({ columns, data, fileName, ... })
     const opts = arg1 as ExportOptions;
     columns = opts.columns;
