@@ -418,6 +418,16 @@ export function generateChannelData(
   };
 
   // ===== 小表8: 险种计算器数据（险种×总行的新约保费汇总 + 原始明细） =====
+  // 构建网点全名→支行的映射表（从 netRows 中获取）
+  const wdBranchMap = new Map<string, string>();
+  for (const nr of netRows) {
+    const wdName = safeStr(nr['代理机构名称']);
+    const branch = safeStr(nr['支行']);
+    if (wdName && branch) {
+      wdBranchMap.set(wdName, branch);
+    }
+  }
+
   const productBankPremium: Record<string, Record<string, number>> = {};
   const allInsuranceProducts = new Set<string>();
   const insuranceDetailRows: Array<{
@@ -433,11 +443,12 @@ export function generateChannelData(
     allInsuranceProducts.add(xz);
     if (!productBankPremium[xz]) productBankPremium[xz] = {};
     productBankPremium[xz][bank] = (productBankPremium[xz][bank] || 0) + aj;
+    const wdName = safeStr(row['业绩归属网点名称']) || safeStr(row['代理机构名称']);
     insuranceDetailRows.push({
       xz,
       bank,
-      branch: safeStr(row['十大银行渠道']),
-      wd: safeStr(row['业绩归属网点名称']) || safeStr(row['代理机构名称']),
+      branch: wdBranchMap.get(wdName) || safeStr(row['十大银行渠道']),
+      wd: wdName,
       premium: aj,
       bdh: safeStr(row['保单号']),
       jfjg: safeStr(row['缴费间隔']),
