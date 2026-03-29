@@ -22,6 +22,20 @@ function parseRatio(input: string): number {
   return 1;
 }
 
+interface DetailRow {
+  xz: string;
+  bank: string;
+  branch: string;
+  wd: string;
+  premium: number;
+  bdh: string;
+  jfjg: string;
+  jfqn: string;
+  signDate: string;
+  status: string;
+  ywymc: string;
+}
+
 export default function InsuranceCalcTab() {
   const { reportData } = useReport();
   const data = reportData?.channel;
@@ -30,15 +44,13 @@ export default function InsuranceCalcTab() {
   const [ratioInputs, setRatioInputs] = useState<Record<string, string>>({});
   const [defaultRatioInput, setDefaultRatioInput] = useState<string>("");
   const [initialized, setInitialized] = useState(false);
-  // 展开明细的险种
-  const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
 
   if (!data) return <div className="p-4 text-sm text-muted-foreground">请先导入数据</div>;
 
   const { insuranceCalcData } = data as any;
   if (!insuranceCalcData) return <div className="p-4 text-sm text-muted-foreground">暂无险种数据</div>;
 
-  const { products = [], banks = [], premiumMap = {} } = insuranceCalcData;
+  const { products = [], banks = [], premiumMap = {}, detailRows = [] } = insuranceCalcData;
 
   // 初始化：默认全部勾选
   if (!initialized && products.length > 0) {
@@ -58,24 +70,6 @@ export default function InsuranceCalcTab() {
         total += premiumMap[prod]?.[bank] || 0;
       }
       result[prod] = total;
-    }
-    return result;
-  }, [selectedBank, products, banks, premiumMap]);
-
-  // 每个险种按总行维度的明细（按保费降序）
-  const productBankDetails = useMemo(() => {
-    const result: Record<string, Array<{ bank: string; premium: number }>> = {};
-    const filteredBanks = selectedBank === "all" ? banks : [selectedBank];
-    for (const prod of products) {
-      const details: Array<{ bank: string; premium: number }> = [];
-      for (const bank of filteredBanks) {
-        const premium = premiumMap[prod]?.[bank] || 0;
-        if (premium > 0) {
-          details.push({ bank, premium });
-        }
-      }
-      details.sort((a, b) => b.premium - a.premium);
-      result[prod] = details;
     }
     return result;
   }, [selectedBank, products, banks, premiumMap]);
@@ -101,10 +95,6 @@ export default function InsuranceCalcTab() {
 
   const updateRatio = useCallback((product: string, value: string) => {
     setRatioInputs(prev => ({ ...prev, [product]: value }));
-  }, []);
-
-  const toggleExpand = useCallback((product: string) => {
-    setExpandedProducts(prev => ({ ...prev, [product]: !prev[product] }));
   }, []);
 
   const getEffectiveRatio = useCallback((product: string): number => {
@@ -133,6 +123,23 @@ export default function InsuranceCalcTab() {
   }, [sortedProducts, checkedProducts, productPremiums, getEffectiveRatio]);
 
   const visibleProducts = sortedProducts.filter((p: string) => (productPremiums[p] || 0) > 0);
+
+  // 根据当前筛选条件（总行 + 勾选的险种）过滤明细数据
+  const filteredDetails = useMemo(() => {
+    const checkedSet = new Set<string>();
+    for (const prod of visibleProducts) {
+      if (checkedProducts[prod]) checkedSet.add(prod);
+    }
+    if (checkedSet.size === 0) return [];
+
+    return (detailRows as DetailRow[])
+      .filter((row: DetailRow) => {
+        if (!checkedSet.has(row.xz)) return false;
+        if (selectedBank !== "all" && row.bank !== selectedBank) return false;
+        return true;
+      })
+      .sort((a: DetailRow, b: DetailRow) => b.premium - a.premium);
+  }, [detailRows, checkedProducts, selectedBank, visibleProducts]);
 
   return (
     <div className="p-4 space-y-4">
@@ -209,13 +216,12 @@ export default function InsuranceCalcTab() {
                   <th className={thCls}>新约保费</th>
                   <th className={thCls} style={{ width: 120 }}>约定比例</th>
                   <th className={thCls}>比例后金额</th>
-                  <th className={thCls} style={{ width: 50 }}>明细</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-8 text-muted-foreground">
+                    <td colSpan={6} className="text-center py-8 text-muted-foreground">
                       暂无匹配数据
                     </td>
                   </tr>
@@ -227,69 +233,36 @@ export default function InsuranceCalcTab() {
                       const individualInput = ratioInputs[prod] || "";
                       const effectiveRatio = getEffectiveRatio(prod);
                       const adjusted = premium / effectiveRatio;
-                      const isExpanded = !!expandedProducts[prod];
-                      const details = productBankDetails[prod] || [];
 
                       return (
-                        <>
-                          {/* 险种主行 */}
-                          <tr
-                            key={prod}
-                            className={`${rowHover} ${!isChecked ? "opacity-40" : ""}`}
-                          >
-                            <td className={tdCls}>
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => toggleProduct(prod)}
-                                className="cursor-pointer"
-                              />
-                            </td>
-                            <td className={tdCls}>{i + 1}</td>
-                            <td className={tdCls}>{prod}</td>
-                            <td className={`${tdCls} ${monoR}`}>{fmt(premium)}</td>
-                            <td className={tdCls}>
-                              <input
-                                type="text"
-                                className="text-xs border border-border rounded px-1.5 py-1 bg-background w-full text-center"
-                                placeholder={defaultRatioInput.trim() || "1:3"}
-                                value={individualInput}
-                                onChange={(e) => updateRatio(prod, e.target.value)}
-                              />
-                            </td>
-                            <td className={`${tdCls} ${monoR} font-semibold ${isChecked ? "text-green-600" : ""}`}>
-                              {fmt(adjusted)}
-                            </td>
-                            <td className={tdCls}>
-                              {details.length > 1 && (
-                                <button
-                                  onClick={() => toggleExpand(prod)}
-                                  className="text-xs text-primary hover:underline cursor-pointer"
-                                >
-                                  {isExpanded ? "收起" : "展开"}
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                          {/* 明细行 */}
-                          {isExpanded && details.map((d, j) => (
-                            <tr
-                              key={`${prod}-${d.bank}`}
-                              className={`bg-muted/30 ${!isChecked ? "opacity-40" : ""}`}
-                            >
-                              <td className={tdCls}></td>
-                              <td className={tdCls}></td>
-                              <td className={`${tdCls} pl-8 text-muted-foreground`}>
-                                <span className="inline-block w-3 border-l border-b border-muted-foreground/30 h-3 mr-1 align-middle" />
-                                {d.bank}
-                              </td>
-                              <td className={`${tdCls} ${monoR} text-muted-foreground`}>{fmt(d.premium)}</td>
-                              <td className={tdCls}></td>
-                              <td className={`${tdCls} ${monoR} text-muted-foreground`}>{fmt(d.premium / effectiveRatio)}</td>
-                              <td className={tdCls}></td>
-                            </tr>
-                          ))}
-                        </>
+                        <tr
+                          key={prod}
+                          className={`${rowHover} ${!isChecked ? "opacity-40" : ""}`}
+                        >
+                          <td className={tdCls}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleProduct(prod)}
+                              className="cursor-pointer"
+                            />
+                          </td>
+                          <td className={tdCls}>{i + 1}</td>
+                          <td className={tdCls}>{prod}</td>
+                          <td className={`${tdCls} ${monoR}`}>{fmt(premium)}</td>
+                          <td className={tdCls}>
+                            <input
+                              type="text"
+                              className="text-xs border border-border rounded px-1.5 py-1 bg-background w-full text-center"
+                              placeholder={defaultRatioInput.trim() || "1:3"}
+                              value={individualInput}
+                              onChange={(e) => updateRatio(prod, e.target.value)}
+                            />
+                          </td>
+                          <td className={`${tdCls} ${monoR} font-semibold ${isChecked ? "text-green-600" : ""}`}>
+                            {fmt(adjusted)}
+                          </td>
+                        </tr>
                       );
                     })}
                     <tr className="bg-muted/50 font-semibold border-t-2 border-border">
@@ -299,7 +272,6 @@ export default function InsuranceCalcTab() {
                       <td className={`${tdCls} ${monoR}`}><strong>{fmt(totalPremium)}</strong></td>
                       <td className={tdCls}></td>
                       <td className={`${tdCls} ${monoR} text-green-600`}><strong>{fmt(totalAdjusted)}</strong></td>
-                      <td className={tdCls}></td>
                     </tr>
                   </>
                 )}
@@ -308,6 +280,55 @@ export default function InsuranceCalcTab() {
           </div>
         </CardContent>
       </Card>
+
+      {/* 明细表格 */}
+      {filteredDetails.length > 0 && (
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-4 py-2 border-b border-border bg-muted/30">
+              <p className="text-xs font-semibold">
+                业务明细（已选险种，共 {filteredDetails.length} 条）
+              </p>
+            </div>
+            <div className="overflow-x-auto" style={{ maxHeight: 480 }}>
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 z-10">
+                  <tr>
+                    <th className={thCls} style={{ width: 45 }}>序号</th>
+                    <th className={thCls}>险种</th>
+                    <th className={thCls}>总行</th>
+                    <th className={thCls}>网点</th>
+                    <th className={thCls}>新约保费</th>
+                    <th className={thCls}>保单号</th>
+                    <th className={thCls}>缴费间隔</th>
+                    <th className={thCls}>缴费期间</th>
+                    <th className={thCls}>签单日期</th>
+                    <th className={thCls}>保单状态</th>
+                    <th className={thCls}>客户经理</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredDetails.map((row: DetailRow, i: number) => (
+                    <tr key={i} className={rowHover}>
+                      <td className={tdCls}>{i + 1}</td>
+                      <td className={tdCls}>{row.xz}</td>
+                      <td className={tdCls}>{row.bank || "-"}</td>
+                      <td className={tdCls}>{row.wd || "-"}</td>
+                      <td className={`${tdCls} ${monoR}`}>{fmt(row.premium)}</td>
+                      <td className={tdCls}>{row.bdh || "-"}</td>
+                      <td className={tdCls}>{row.jfjg || "-"}</td>
+                      <td className={tdCls}>{row.jfqn || "-"}</td>
+                      <td className={tdCls}>{row.signDate || "-"}</td>
+                      <td className={tdCls}>{row.status || "-"}</td>
+                      <td className={tdCls}>{row.ywymc || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

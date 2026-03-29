@@ -417,9 +417,14 @@ export function generateChannelData(
     dcTarget: networkPerformance.reduce((s, n) => s + n.dcTarget, 0),
   };
 
-  // ===== 小表8: 险种计算器数据（险种×总行的新约保费汇总） =====
+  // ===== 小表8: 险种计算器数据（险种×总行的新约保费汇总 + 原始明细） =====
   const productBankPremium: Record<string, Record<string, number>> = {};
   const allInsuranceProducts = new Set<string>();
+  const insuranceDetailRows: Array<{
+    xz: string; bank: string; branch: string; wd: string; premium: number;
+    bdh: string; jfjg: string; jfqn: string; signDate: string; status: string;
+    ywymc: string;
+  }> = [];
   for (const row of dataRows) {
     const xz = safeStr(row['险种']);
     const bank = safeStr(row['银行总行']);
@@ -428,12 +433,26 @@ export function generateChannelData(
     allInsuranceProducts.add(xz);
     if (!productBankPremium[xz]) productBankPremium[xz] = {};
     productBankPremium[xz][bank] = (productBankPremium[xz][bank] || 0) + aj;
+    insuranceDetailRows.push({
+      xz,
+      bank,
+      branch: safeStr(row['十大银行渠道']),
+      wd: safeStr(row['业绩归属网点名称']) || safeStr(row['代理机构名称']),
+      premium: aj,
+      bdh: safeStr(row['保单号']),
+      jfjg: safeStr(row['缴费间隔']),
+      jfqn: safeStr(row['缴费期间年']),
+      signDate: safeStr(row['保单签单日期']),
+      status: safeStr(row['保单状态']),
+      ywymc: safeStr(row['业绩归属客户经理姓名']),
+    });
   }
   const insuranceProductList = Array.from(allInsuranceProducts).sort();
   const insuranceCalcData = {
     products: insuranceProductList,
     banks: bankList,
     premiumMap: productBankPremium,
+    detailRows: insuranceDetailRows,
   };
 
   return {
