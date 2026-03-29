@@ -428,6 +428,18 @@ export function generateChannelData(
     }
   }
 
+  console.log(`[InsCalc] wdBranchMap size: ${wdBranchMap.size}`);
+  if (wdBranchMap.size > 0) {
+    const sample = Array.from(wdBranchMap.entries()).slice(0, 3);
+    console.log(`[InsCalc] wdBranchMap sample:`, JSON.stringify(sample));
+  }
+  // 打印 dataRows 中的网点名称样本
+  const sampleWds = dataRows.slice(0, 5).map(r => ({
+    wd1: safeStr(r['业绩归属网点名称']),
+    wd2: safeStr(r['代理机构名称']),
+  }));
+  console.log(`[InsCalc] dataRows sample wds:`, JSON.stringify(sampleWds));
+
   const productBankPremium: Record<string, Record<string, number>> = {};
   const allInsuranceProducts = new Set<string>();
   const insuranceDetailRows: Array<{
