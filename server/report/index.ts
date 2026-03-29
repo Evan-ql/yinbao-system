@@ -55,33 +55,20 @@ export function processReport(
   }
 
   // 从 deptTargets 中移除已离职的营业部经理
-  // 离职人员在离职前的月份仍保留在报表中，离职后的月份不再显示
-  // 注意：同一个人可能有多条记录（resigned + active），以 active 为准
+  // 离职人员从标记离职的月份开始不再显示
   const staffList: any[] = settings.staff || [];
   const staffNameSet = new Set<string>();
-  const activeNames = new Set<string>();
-  const resignedCandidates = new Set<string>();
+  const resignedNames = new Set<string>();
   for (const s of staffList) {
     if (s.role === 'deptManager') {
       staffNameSet.add(s.name);
-      if (s.status === 'active') {
-        activeNames.add(s.name);
-      } else if (s.status === 'resigned') {
+      if (s.status === 'resigned') {
         const resignedMonth = s.resignedMonth || 0;
-        // 如果报表的结束月份 >= 离职月份，则标记为候选移除
+        // 如果报表的结束月份 >= 离职月份，则从目标中移除
         if (resignedMonth === 0 || monthEnd >= resignedMonth) {
-          resignedCandidates.add(s.name);
+          resignedNames.add(s.name);
         }
       }
-    }
-  }
-  // 最终确定离职名单：仅当该人没有 active 记录时才真正移除
-  const resignedNames = new Set<string>();
-  for (const name of resignedCandidates) {
-    if (!activeNames.has(name)) {
-      resignedNames.add(name);
-    } else {
-      console.log(`[Report] Dept manager '${name}' has both resigned and active records, keeping as active`);
     }
   }
   // 双重检查：如果 deptTargets 中的人在 staff 中完全不存在（被删除而非标记resigned），也移除
