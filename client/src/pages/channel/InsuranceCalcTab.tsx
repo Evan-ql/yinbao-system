@@ -316,7 +316,7 @@ export default function InsuranceCalcTab() {
                       <td className={tdCls}>{row.bank || "-"}</td>
                       <td className={tdCls}>{row.branch || "-"}</td>
                       <td className={tdCls}>{row.wd || "-"}</td>
-                      <td className={`${tdCls} ${monoR}`}>{fmt(row.premium)}</td>
+                      <td className={`${tdCls} ${monoR}`}>{fmt(row.premium / getEffectiveRatio(row.xz))}</td>
                       <td className={tdCls}>{row.bdh || "-"}</td>
                       <td className={tdCls}>{row.jfjg || "-"}</td>
                       <td className={tdCls}>{row.jfqn || "-"}</td>
