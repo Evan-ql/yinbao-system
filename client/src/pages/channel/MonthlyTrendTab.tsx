@@ -47,8 +47,8 @@ export default function MonthlyTrendTab() {
     exportToExcel({
       fileName: "月度趋势",
       sheets: [
-        { name: "年交", columns, data: qjData.exportData, totalRow: qjData.totalRowData, totalLabel: "合计" },
-        { name: "趸交", columns, data: dcData.exportData, totalRow: dcData.totalRowData, totalLabel: "合计" },
+        { sheetName: "年交", columns, data: qjData.exportData, totalRow: qjData.totalRowData, totalLabel: "合计" },
+        { sheetName: "趸交", columns, data: dcData.exportData, totalRow: dcData.totalRowData, totalLabel: "合计" },
       ],
     });
   };

@@ -59,8 +59,8 @@ export default function ChannelSummaryTab() {
     exportToExcel({
       fileName: "渠道业务数据",
       sheets: [
-        { name: "年交", columns, data: qjData.exportData, totalRow: qjData.totalRowData, totalLabel: "中支合计" },
-        { name: "趸交", columns, data: dcData.exportData, totalRow: dcData.totalRowData, totalLabel: "中支合计" },
+        { sheetName: "年交", columns, data: qjData.exportData, totalRow: qjData.totalRowData, totalLabel: "中支合计" },
+        { sheetName: "趸交", columns, data: dcData.exportData, totalRow: dcData.totalRowData, totalLabel: "中支合计" },
       ],
     });
   };

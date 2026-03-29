@@ -121,7 +121,8 @@ export default function NetworkTab() {
       });
       const result = await res.json();
       if (result.ok) {
-        toast.success(`成功导入 ${result.count} 条支行-网点映射，正在同步报表数据...`);
+        const filledMsg = result.filled > 0 ? `，自动识别总行 ${result.filled} 条` : '';
+        toast.success(`成功导入 ${result.count} 条支行-网点映射${filledMsg}，正在同步报表数据...`);
         networkShorts.refresh();
         // 如果已有报表数据，触发重新生成以同步支行数据到渠道页面
         if (dataStatus?.hasReport) {

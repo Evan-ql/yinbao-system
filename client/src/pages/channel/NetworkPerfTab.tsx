@@ -129,8 +129,8 @@ export default function NetworkPerfTab() {
     exportToExcel({
       fileName: "网点业绩明细",
       sheets: [
-        { name: "期交", columns: qjSheet.columns, data: qjSheet.exportData, totalRow: qjSheet.totalRowData, totalLabel: "合计" },
-        { name: "趸交", columns: dcSheet.columns, data: dcSheet.exportData, totalRow: dcSheet.totalRowData, totalLabel: "合计" },
+        { sheetName: "期交", columns: qjSheet.columns, data: qjSheet.exportData, totalRow: qjSheet.totalRowData, totalLabel: "合计" },
+        { sheetName: "趸交", columns: dcSheet.columns, data: dcSheet.exportData, totalRow: dcSheet.totalRowData, totalLabel: "合计" },
       ],
     });
   };

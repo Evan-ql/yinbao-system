@@ -13,7 +13,7 @@ import { storagePut, storageGet } from './storage';
 import { syncFromTemplate, syncFromRenwang } from './syncSettings';
 import { scanStaffFromSource, fillMissingAttribution, extractStaffTrack } from './staffScanner';
 import { compareThreeWay, DiffResult, DiffItem } from './staffDiff';
-import { onStaffChanged, onNetworkShortsChanged, getSettingsData, updateSettings } from './settingsApi';
+import { onStaffChanged, onNetworkShortsChanged, getSettingsData, updateSettings, autoFillTotalBank } from './settingsApi';
 import { generateZipBuffer } from './exportExcel';
 
 const upload = multer({
@@ -511,6 +511,10 @@ router.post(
       let report = null;
       if (!staffDiff?.hasChanges) {
         report = await tryAutoGenerate();
+        // 报表生成后，自动补全网点简称中空的总行名称
+        if (report) {
+          autoFillTotalBank();
+        }
       }
 
       res.json({

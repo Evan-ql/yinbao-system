@@ -534,6 +534,42 @@ router.delete('/network-shorts/:id', (req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
+// 批量补全总行名称（对所有 totalBank 为空的记录，从报表缓存中自动匹配）
+export function autoFillTotalBank() {
+  try {
+    const { getCachedReport } = require('./reportApi');
+    const report = getCachedReport();
+    if (!report?.network) return 0;
+    const totalBankMap = new Map<string, string>();
+    for (const nr of report.network) {
+      const name = nr['代理机构名称'] || '';
+      const bank = nr['总行名称'] || '';
+      if (name && bank) totalBankMap.set(name, bank);
+    }
+    let filled = 0;
+    updateSettings(s => {
+      for (const ns of s.networkShorts) {
+        if (!ns.totalBank && totalBankMap.has(ns.fullName)) {
+          ns.totalBank = totalBankMap.get(ns.fullName)!;
+          filled++;
+        }
+      }
+    });
+    if (filled > 0) {
+      console.log(`[Settings] Auto-filled totalBank for ${filled} network-shorts entries`);
+    }
+    return filled;
+  } catch (e) {
+    return 0;
+  }
+}
+
+// 手动触发批量补全总行接口
+router.post('/network-shorts/fill-total-bank', (_req: Request, res: Response) => {
+  const filled = autoFillTotalBank();
+  res.json({ ok: true, filled });
+});
+
 // 批量导入支行-网点映射（从 Excel）
 router.post('/network-shorts/import-branch', (req: Request, res: Response) => {
   try {
@@ -581,9 +617,11 @@ router.post('/network-shorts/import-branch', (req: Request, res: Response) => {
         }
       }
     });
+    // 导入完成后，尝试补全所有空总行的记录
+    const filled = autoFillTotalBank();
     // 触发报表重新生成，使支行数据同步到渠道页面
     notifyNetworkShortsChanged();
-    res.json({ ok: true, count: items.length, needRegenerate: true });
+    res.json({ ok: true, count: items.length, filled, needRegenerate: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message || '导入失败' });
   }
