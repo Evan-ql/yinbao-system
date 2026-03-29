@@ -76,6 +76,8 @@ export interface CoreNetwork {
 
 export interface NetworkShort {
   id: string;
+  totalBank: string; // 总行名称
+  branch: string; // 支行名称
   fullName: string; // 网点全名
   shortName: string; // 网点简称
 }
@@ -530,6 +532,59 @@ router.delete('/network-shorts/:id', (req: Request, res: Response) => {
     s.networkShorts = s.networkShorts.filter(i => i.id !== req.params.id);
   });
   res.json({ ok: true });
+});
+
+// 批量导入支行-网点映射（从 Excel）
+router.post('/network-shorts/import-branch', (req: Request, res: Response) => {
+  try {
+    const items: Array<{ totalBank: string; branch: string; fullName: string; shortName: string }> = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: '数据为空' });
+    }
+
+    // 从报表缓存的 network 数据中构建 网点全名→总行名称 的映射
+    const totalBankMap = new Map<string, string>();
+    try {
+      const { getCachedReport } = require('./reportApi');
+      const report = getCachedReport();
+      if (report?.network) {
+        for (const nr of report.network) {
+          const name = nr['代理机构名称'] || '';
+          const bank = nr['总行名称'] || '';
+          if (name && bank) {
+            totalBankMap.set(name, bank);
+          }
+        }
+      }
+    } catch (e) {
+      // 报表未生成时忽略
+    }
+
+    updateSettings(s => {
+      for (const item of items) {
+        // 自动识别总行：优先用用户提供的，否则从人网数据中查找
+        const autoTotalBank = item.totalBank || totalBankMap.get(item.fullName) || '';
+
+        const existing = s.networkShorts.find(n => n.fullName === item.fullName);
+        if (existing) {
+          existing.totalBank = autoTotalBank;
+          existing.branch = item.branch || '';
+          if (item.shortName) existing.shortName = item.shortName;
+        } else {
+          s.networkShorts.push({
+            id: genId(),
+            totalBank: autoTotalBank,
+            branch: item.branch || '',
+            fullName: item.fullName,
+            shortName: item.shortName || '',
+          });
+        }
+      }
+    });
+    res.json({ ok: true, count: items.length });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || '导入失败' });
+  }
 });
 
 // ===== 网点目标 =====

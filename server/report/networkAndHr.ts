@@ -3,6 +3,7 @@
  */
 import XLSX from 'xlsx';
 import { safeFloat, safeStr, LookupTables, DataRow } from './utils';
+import { getSettingsData } from '../settingsApi';
 
 /**
  * 解析人网文件，返回两个Sheet的原始行数据
@@ -104,6 +105,24 @@ export function generateNetwork(
     }
   }
 
+  // 构建网点全名→支行的映射表
+  const branchMap = new Map<string, string>();
+  try {
+    const settings = getSettingsData();
+    if (settings.networkShorts) {
+      for (const ns of settings.networkShorts) {
+        if (ns.fullName && ns.branch) {
+          branchMap.set(ns.fullName, ns.branch);
+        }
+      }
+    }
+  } catch (e) {
+    // 系统设置未加载时忽略
+  }
+  if (branchMap.size > 0) {
+    console.log(`[Network] Loaded branch mapping: ${branchMap.size} entries`);
+  }
+
   const netRows: DataRow[] = [];
   for (const rw of rawData) {
     if (!rw['代理机构名称']) continue;
@@ -129,6 +148,7 @@ export function generateNetwork(
       '件数': jsByWd[wdName] || 0,
       '趸交': dcByWd[wdName] || 0,
       '实时保费': njSsByWd[wdName] || 0,
+      '支行': branchMap.get(wdName) || '',
     });
   }
 

@@ -10,6 +10,7 @@ export default function NetworkPerfTab() {
   const data = reportData?.channel;
   const [mode, setMode] = useState<"qj" | "dc">("qj");
   const [bankFilter, setBankFilter] = useState<string>("all");
+  const [branchFilter, setBranchFilter] = useState<string>("all");
   const [deptFilter, setDeptFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "notOpen">("all");
 
@@ -23,22 +24,35 @@ export default function NetworkPerfTab() {
     return Array.from(banks).sort();
   }, [networkPerformance]);
 
+  // 支行列表：根据当前银行筛选动态生成
+  const branchList = useMemo(() => {
+    const branches = new Set<string>();
+    networkPerformance.forEach((n: any) => {
+      if (n.branch && (bankFilter === "all" || n.bank === bankFilter)) {
+        branches.add(n.branch);
+      }
+    });
+    return Array.from(branches).sort();
+  }, [networkPerformance, bankFilter]);
+
   const deptList = useMemo(() => {
     const depts = new Set<string>();
     networkPerformance.forEach((n: any) => { if (n.deptManager) depts.add(n.deptManager); });
     return Array.from(depts).sort();
   }, [networkPerformance]);
 
+
   const filtered = useMemo(() => {
     let rows = networkPerformance;
     if (bankFilter !== "all") rows = rows.filter((n: any) => n.bank === bankFilter);
+    if (branchFilter !== "all") rows = rows.filter((n: any) => n.branch === branchFilter);
     if (deptFilter !== "all") rows = rows.filter((n: any) => n.deptManager === deptFilter);
     if (statusFilter === "open") rows = rows.filter((n: any) => (mode === "qj" ? n.qj : n.dc) > 0);
     if (statusFilter === "notOpen") rows = rows.filter((n: any) => (mode === "qj" ? n.qj : n.dc) === 0);
     return [...rows].sort((a: any, b: any) =>
       mode === "qj" ? b.qj - a.qj : b.dc - a.dc
     );
-  }, [networkPerformance, bankFilter, deptFilter, statusFilter, mode]);
+  }, [networkPerformance, bankFilter, branchFilter, deptFilter, statusFilter, mode]);
 
   const filteredTotals = useMemo(() => ({
     baofei: filtered.reduce((s: number, n: any) => s + (mode === "qj" ? n.qj : n.dc), 0),
@@ -48,11 +62,18 @@ export default function NetworkPerfTab() {
 
   const isQj = mode === "qj";
 
+  // 当银行筛选变化时，重置支行筛选
+  const handleBankFilterChange = (value: string) => {
+    setBankFilter(value);
+    setBranchFilter("all");
+  };
+
   const buildSheetData = (modeType: "qj" | "dc") => {
     const isQ = modeType === "qj";
     const label = isQ ? "期交" : "趸交";
     const columns: ExportColumn[] = [
       { header: "银行", key: "bank", width: 14 },
+      { header: "支行", key: "branch", width: 12 },
       { header: "网点名称", key: "name", width: 20 },
       { header: "简称", key: "shortName", width: 14 },
       { header: "部门经理", key: "deptManager", width: 10 },
@@ -71,6 +92,7 @@ export default function NetworkPerfTab() {
       const tgt = isQ ? n.qjTarget : n.dcTarget;
       return {
         bank: n.bank,
+        branch: n.branch || "",
         name: n.name,
         shortName: n.shortName || "",
         deptManager: n.deptManager,
@@ -87,6 +109,7 @@ export default function NetworkPerfTab() {
     const totalTarget = allRows.reduce((s: number, n: any) => s + (isQ ? n.qjTarget : n.dcTarget), 0);
     const totalRowData: any = {
       bank: "合计",
+      branch: "",
       name: "",
       shortName: "",
       deptManager: "",
@@ -123,10 +146,20 @@ export default function NetworkPerfTab() {
           <select
             className="text-xs border border-border rounded px-2 py-1.5 bg-background"
             value={bankFilter}
-            onChange={(e) => setBankFilter(e.target.value)}
+            onChange={(e) => handleBankFilterChange(e.target.value)}
           >
             <option value="all">全部渠道</option>
             {bankList.map((b: string) => (
+              <option key={b} value={b}>{b}</option>
+            ))}
+          </select>
+          <select
+            className="text-xs border border-border rounded px-2 py-1.5 bg-background"
+            value={branchFilter}
+            onChange={(e) => setBranchFilter(e.target.value)}
+          >
+            <option value="all">全部支行</option>
+            {branchList.map((b: string) => (
               <option key={b} value={b}>{b}</option>
             ))}
           </select>
@@ -176,6 +209,7 @@ export default function NetworkPerfTab() {
         >
           共 {networkPerformance.filter((n: any) =>
             (bankFilter === "all" || n.bank === bankFilter) &&
+            (branchFilter === "all" || n.branch === branchFilter) &&
             (deptFilter === "all" || n.deptManager === deptFilter)
           ).length} 个网点
         </button>
@@ -189,6 +223,7 @@ export default function NetworkPerfTab() {
         >
           已开单 {networkPerformance.filter((n: any) =>
             (bankFilter === "all" || n.bank === bankFilter) &&
+            (branchFilter === "all" || n.branch === branchFilter) &&
             (deptFilter === "all" || n.deptManager === deptFilter) &&
             (isQj ? n.qj : n.dc) > 0
           ).length}
@@ -203,6 +238,7 @@ export default function NetworkPerfTab() {
         >
           未开单 {networkPerformance.filter((n: any) =>
             (bankFilter === "all" || n.bank === bankFilter) &&
+            (branchFilter === "all" || n.branch === branchFilter) &&
             (deptFilter === "all" || n.deptManager === deptFilter) &&
             (isQj ? n.qj : n.dc) === 0
           ).length}
@@ -217,6 +253,7 @@ export default function NetworkPerfTab() {
                 <tr>
                   <th className={thCls}>序号</th>
                   <th className={thCls}>银行渠道</th>
+                  <th className={thCls}>支行</th>
                   <th className={thCls}>网点名称</th>
                   <th className={thCls}>营业部经理</th>
                   <th className={thCls}>客户经理</th>
@@ -240,6 +277,7 @@ export default function NetworkPerfTab() {
                     <tr key={i} className={`${rowHover} ${baofei === 0 ? "bg-red-50/50" : ""}`}>
                       <td className={tdCls}>{i + 1}</td>
                       <td className={tdCls}>{n.bank}</td>
+                      <td className={tdCls}>{n.branch || "-"}</td>
                       <td className={tdCls} title={n.shortName ? `简称: ${n.shortName}` : ''}>
                         {n.name}
                       </td>
@@ -281,7 +319,7 @@ export default function NetworkPerfTab() {
                 })}
                 <tr className={totalRow}>
                   <td className={tdCls}></td>
-                  <td className={tdCls} colSpan={4}><strong>合计</strong></td>
+                  <td className={tdCls} colSpan={5}><strong>合计</strong></td>
                   <td className={`${tdCls} ${monoR}`}><strong>{fmt(filteredTotals.baofei)}</strong></td>
                   <td className={`${tdCls} ${monoR}`}><strong>{filteredTotals.js}</strong></td>
                   <td className={`${tdCls} ${monoR}`}>

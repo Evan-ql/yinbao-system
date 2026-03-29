@@ -1058,4 +1058,9 @@ onStaffChanged(async () => {
   }
 });
 
+/** 获取当前缓存的报表数据（供其他模块读取） */
+export function getCachedReport(): any {
+  return cachedReport;
+}
+
 export default router;

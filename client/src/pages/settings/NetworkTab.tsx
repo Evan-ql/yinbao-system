@@ -1,5 +1,9 @@
+import { useState, useRef } from "react";
 import SettingsTable, { ColumnDef } from "@/components/SettingsTable";
 import { useSettingsData } from "@/hooks/useSettings";
+import { Button } from "@/components/ui/button";
+import { Upload } from "lucide-react";
+import { toast } from "sonner";
 
 interface CoreNetwork {
   id: string;
@@ -14,6 +18,8 @@ interface CoreNetwork {
 
 interface NetworkShort {
   id: string;
+  totalBank: string;
+  branch: string;
   fullName: string;
   shortName: string;
 }
@@ -47,6 +53,8 @@ const coreNetworkColumns: ColumnDef[] = [
 ];
 
 const networkShortColumns: ColumnDef[] = [
+  { key: "totalBank", label: "总行", type: "text" },
+  { key: "branch", label: "支行", type: "text" },
   { key: "fullName", label: "网点全名", type: "text", required: true },
   { key: "shortName", label: "网点简称", type: "text", required: true },
 ];
@@ -64,11 +72,69 @@ export default function NetworkTab() {
   const coreNetworks = useSettingsData<CoreNetwork>("core-networks");
   const networkShorts = useSettingsData<NetworkShort>("network-shorts");
   const networkTargets = useSettingsData<NetworkTarget>("network-targets");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleImportBranch = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      // 动态导入 xlsx 库
+      const XLSX = await import("xlsx");
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws);
+
+      if (rows.length === 0) {
+        toast.error("Excel 文件中没有数据");
+        return;
+      }
+
+      // 自动识别列名：支持 "网点"/"网点全名"/"代理机构名称" 和 "支行"/"银行支行"
+      const firstRow = rows[0];
+      const keys = Object.keys(firstRow);
+      const fullNameKey = keys.find(k => k === "网点" || k === "网点全名" || k === "代理机构名称" || k === "fullName") || keys[0];
+      const branchKey = keys.find(k => k === "支行" || k === "银行支行" || k === "branch") || keys[1];
+      const totalBankKey = keys.find(k => k === "总行" || k === "银行总行" || k === "totalBank");
+
+      const items = rows.map(row => ({
+        totalBank: totalBankKey ? String(row[totalBankKey] || "") : "",
+        branch: String(row[branchKey] || ""),
+        fullName: String(row[fullNameKey] || ""),
+        shortName: "",
+      })).filter(item => item.fullName);
+
+      if (items.length === 0) {
+        toast.error("未识别到有效的网点数据");
+        return;
+      }
+
+      const res = await fetch("/api/settings/network-shorts/import-branch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(items),
+      });
+      const result = await res.json();
+      if (result.ok) {
+        toast.success(`成功导入 ${result.count} 条支行-网点映射`);
+        networkShorts.refresh();
+      } else {
+        toast.error(result.error || "导入失败");
+      }
+    } catch (err: any) {
+      toast.error("导入失败: " + (err.message || "未知错误"));
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   return (
     <div className="space-y-6">
       <div className="text-sm text-muted-foreground">
-        管理核心网点列表、网点简称映射和网点业绩目标。
+        管理核心网点列表、网点定义（总行—支行—网点层级）和网点业绩目标。
       </div>
 
       <SettingsTable
@@ -93,16 +159,43 @@ export default function NetworkTab() {
         loading={coreNetworks.loading}
       />
 
-      <SettingsTable
-        title="网点简称"
-        description="维护网点全名到简称的对应关系"
-        columns={networkShortColumns}
-        data={networkShorts.data}
-        onAdd={networkShorts.add}
-        onUpdate={networkShorts.update}
-        onDelete={networkShorts.remove}
-        loading={networkShorts.loading}
-      />
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h3 className="text-sm font-semibold">网点定义</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              维护总行—支行—网点的三级层级关系和网点简称映射
+            </p>
+          </div>
+          <div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={handleImportBranch}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+            >
+              <Upload className="h-3.5 w-3.5 mr-1.5" />
+              {importing ? "导入中..." : "导入支行-网点映射"}
+            </Button>
+          </div>
+        </div>
+        <SettingsTable
+          title=""
+          columns={networkShortColumns}
+          data={networkShorts.data}
+          onAdd={networkShorts.add}
+          onUpdate={networkShorts.update}
+          onDelete={networkShorts.remove}
+          loading={networkShorts.loading}
+        />
+      </div>
     </div>
   );
 }

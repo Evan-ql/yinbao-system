@@ -8,6 +8,7 @@ import ProductDetailTab from "./channel/ProductDetailTab";
 import DcProductTab from "./channel/DcProductTab";
 import NetworkOpenTab from "./channel/NetworkOpenTab";
 import NetworkPerfTab from "./channel/NetworkPerfTab";
+import InsuranceCalcTab from "./channel/InsuranceCalcTab";
 
 const tabs = [
   { key: "summary", label: "业务数据—渠道" },
@@ -17,6 +18,7 @@ const tabs = [
   { key: "dc-product", label: "趸交产品数据" },
   { key: "network-open", label: "网点数据—开单网点" },
   { key: "network-perf", label: "网点业绩明细" },
+  { key: "insurance-calc", label: "险种计算器" },
 ] as const;
 
 type TabKey = (typeof tabs)[number]["key"];
@@ -29,6 +31,7 @@ const tabComponents: Record<TabKey, React.ComponentType> = {
   "dc-product": DcProductTab,
   "network-open": NetworkOpenTab,
   "network-perf": NetworkPerfTab,
+  "insurance-calc": InsuranceCalcTab,
 };
 
 export default function ChannelPage() {

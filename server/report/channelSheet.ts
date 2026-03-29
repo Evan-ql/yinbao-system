@@ -391,6 +391,7 @@ export function generateChannelData(
       name: wdName,
       shortName,
       bank,
+      branch: safeStr(nr['支行']) || '',
       deptManager: deptMgr,
       customerManager: custMgr,
       qj,
@@ -414,6 +415,25 @@ export function generateChannelData(
     js: networkPerformance.reduce((s, n) => s + n.js, 0),
     qjTarget: networkPerformance.reduce((s, n) => s + n.qjTarget, 0),
     dcTarget: networkPerformance.reduce((s, n) => s + n.dcTarget, 0),
+  };
+
+  // ===== 小表8: 险种计算器数据（险种×总行的新约保费汇总） =====
+  const productBankPremium: Record<string, Record<string, number>> = {};
+  const allInsuranceProducts = new Set<string>();
+  for (const row of dataRows) {
+    const xz = safeStr(row['险种']);
+    const bank = safeStr(row['银行总行']);
+    const aj = safeFloat(row['新约保费']);
+    if (!xz || !bank) continue;
+    allInsuranceProducts.add(xz);
+    if (!productBankPremium[xz]) productBankPremium[xz] = {};
+    productBankPremium[xz][bank] = (productBankPremium[xz][bank] || 0) + aj;
+  }
+  const insuranceProductList = Array.from(allInsuranceProducts).sort();
+  const insuranceCalcData = {
+    products: insuranceProductList,
+    banks: bankList,
+    premiumMap: productBankPremium,
   };
 
   return {
@@ -448,5 +468,7 @@ export function generateChannelData(
     // 小表7
     networkPerformance,
     networkPerfTotals,
+    // 小表8
+    insuranceCalcData,
   };
 }
