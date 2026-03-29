@@ -13,7 +13,7 @@ import { storagePut, storageGet } from './storage';
 import { syncFromTemplate, syncFromRenwang } from './syncSettings';
 import { scanStaffFromSource, fillMissingAttribution, extractStaffTrack } from './staffScanner';
 import { compareThreeWay, DiffResult, DiffItem } from './staffDiff';
-import { onStaffChanged, getSettingsData, updateSettings } from './settingsApi';
+import { onStaffChanged, onNetworkShortsChanged, getSettingsData, updateSettings } from './settingsApi';
 import { generateZipBuffer } from './exportExcel';
 
 const upload = multer({
@@ -1055,6 +1055,18 @@ onStaffChanged(async () => {
     }
   } catch (e) {
     console.error('[Report API] Failed to regenerate after staff change:', e);
+  }
+});
+
+// 注册网点映射变动回调：导入支行映射后自动重新生成报表
+onNetworkShortsChanged(async () => {
+  try {
+    const report = await tryAutoGenerate();
+    if (report) {
+      console.log('[Report API] Report regenerated after network-shorts change');
+    }
+  } catch (e) {
+    console.error('[Report API] Failed to regenerate after network-shorts change:', e);
   }
 });
 

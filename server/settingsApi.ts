@@ -581,7 +581,9 @@ router.post('/network-shorts/import-branch', (req: Request, res: Response) => {
         }
       }
     });
-    res.json({ ok: true, count: items.length });
+    // 触发报表重新生成，使支行数据同步到渠道页面
+    notifyNetworkShortsChanged();
+    res.json({ ok: true, count: items.length, needRegenerate: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message || '导入失败' });
   }
@@ -879,6 +881,23 @@ function notifyStaffChanged() {
     // 延迟执行，确保settings已保存
     setTimeout(() => {
       onStaffChangedCallback?.();
+    }, 500);
+  }
+}
+
+// ===== 网点映射变动回调 =====
+// 当networkShorts被导入时，通知报表系统重新生成
+let onNetworkShortsChangedCallback: (() => void) | null = null;
+
+export function onNetworkShortsChanged(callback: () => void) {
+  onNetworkShortsChangedCallback = callback;
+}
+
+function notifyNetworkShortsChanged() {
+  if (onNetworkShortsChangedCallback) {
+    console.log('[Settings] NetworkShorts changed, triggering report regeneration...');
+    setTimeout(() => {
+      onNetworkShortsChangedCallback?.();
     }, 500);
   }
 }

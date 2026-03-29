@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { useReport } from "@/contexts/ReportContext";
 import SettingsTable, { ColumnDef } from "@/components/SettingsTable";
 import { useSettingsData } from "@/hooks/useSettings";
 import { Button } from "@/components/ui/button";
@@ -74,6 +75,7 @@ export default function NetworkTab() {
   const networkTargets = useSettingsData<NetworkTarget>("network-targets");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+  const { regenerateReport, monthStart, monthEnd, dataStatus } = useReport();
 
   const handleImportBranch = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -92,18 +94,19 @@ export default function NetworkTab() {
         return;
       }
 
-      // 自动识别列名：支持 "网点"/"网点全名"/"代理机构名称" 和 "支行"/"银行支行"
+      // 自动识别列名：支持 "网点"/"网点全名"/"代理机构名称" 和 "支行"/"銀行支行"
       const firstRow = rows[0];
       const keys = Object.keys(firstRow);
       const fullNameKey = keys.find(k => k === "网点" || k === "网点全名" || k === "代理机构名称" || k === "fullName") || keys[0];
-      const branchKey = keys.find(k => k === "支行" || k === "银行支行" || k === "branch") || keys[1];
-      const totalBankKey = keys.find(k => k === "总行" || k === "银行总行" || k === "totalBank");
+      const branchKey = keys.find(k => k === "支行" || k === "銀行支行" || k === "branch") || keys[1];
+      const totalBankKey = keys.find(k => k === "总行" || k === "銀行总行" || k === "totalBank");
+      const shortNameKey = keys.find(k => k === "网点简称" || k === "简称" || k === "shortName");
 
       const items = rows.map(row => ({
         totalBank: totalBankKey ? String(row[totalBankKey] || "") : "",
         branch: String(row[branchKey] || ""),
         fullName: String(row[fullNameKey] || ""),
-        shortName: "",
+        shortName: shortNameKey ? String(row[shortNameKey] || "") : "",
       })).filter(item => item.fullName);
 
       if (items.length === 0) {
@@ -118,8 +121,17 @@ export default function NetworkTab() {
       });
       const result = await res.json();
       if (result.ok) {
-        toast.success(`成功导入 ${result.count} 条支行-网点映射`);
+        toast.success(`成功导入 ${result.count} 条支行-网点映射，正在同步报表数据...`);
         networkShorts.refresh();
+        // 如果已有报表数据，触发重新生成以同步支行数据到渠道页面
+        if (dataStatus?.hasReport) {
+          try {
+            await regenerateReport(monthStart, monthEnd);
+            toast.success("报表数据已同步，支行信息已更新");
+          } catch (e) {
+            // 重生失败不影响导入结果
+          }
+        }
       } else {
         toast.error(result.error || "导入失败");
       }
