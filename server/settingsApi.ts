@@ -546,12 +546,45 @@ export function autoFillTotalBank() {
       const bank = nr['总行名称'] || '';
       if (name && bank) totalBankMap.set(name, bank);
     }
+    // 兜底：通过网点全名中的关键字推断总行（用于人网数据中缺失的网点）
+    const bankKeywords: [string, string][] = [
+      ['邮政储蓄', '中国邮政储蓄银行'],
+      ['工商银行', '中国工商银行'],
+      ['农业银行', '中国农业银行'],
+      ['建设银行', '中国建设银行'],
+      ['中国银行股份', '中国银行'],
+      ['交通银行', '交通银行'],
+      ['民生银行', '中国民生银行'],
+      ['光大银行', '中国光大银行'],
+      ['中信银行', '中信银行'],
+      ['浦发银行', '浦发银行'],
+      ['华夏银行', '华夏银行'],
+      ['河北银行', '河北银行'],
+      ['沧州银行', '沧州银行'],
+      ['张家口银行', '张家口银行'],
+    ];
+    function guessTotalBank(fullName: string): string {
+      for (const [keyword, bankName] of bankKeywords) {
+        if (fullName.includes(keyword)) return bankName;
+      }
+      return '';
+    }
     let filled = 0;
     updateSettings(s => {
       for (const ns of s.networkShorts) {
-        if (!ns.totalBank && totalBankMap.has(ns.fullName)) {
-          ns.totalBank = totalBankMap.get(ns.fullName)!;
-          filled++;
+        if (!ns.totalBank) {
+          // 优先从报表数据匹配
+          if (totalBankMap.has(ns.fullName)) {
+            ns.totalBank = totalBankMap.get(ns.fullName)!;
+            filled++;
+          } else {
+            // 兜底：通过关键字推断
+            const guessed = guessTotalBank(ns.fullName);
+            if (guessed) {
+              ns.totalBank = guessed;
+              filled++;
+            }
+          }
         }
       }
     });
