@@ -2,6 +2,8 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import path from "path";
+import fs from "fs";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
@@ -49,6 +51,26 @@ async function startServer() {
       createContext,
     })
   );
+
+  // ===== 本地文件存储下载路由 =====
+  // 为 storage.ts 中 storageGet 返回的 URL 提供文件下载服务
+  // 必须注册在 Vite/serveStatic 的 catch-all 之前，否则会被 SPA fallback 拦截
+  const LOCAL_DATA_DIR = path.resolve(process.cwd(), 'data');
+  app.use('/api/local-storage', (req, res) => {
+    // req.path 以 / 开头，例如 /yinbao-data/uploads/source.xlsx
+    const relPath = req.path.replace(/^\/+/, '');
+    if (!relPath || relPath.includes('..')) {
+      res.status(400).json({ error: 'Invalid path' });
+      return;
+    }
+    const fullPath = path.join(LOCAL_DATA_DIR, relPath);
+    if (!fs.existsSync(fullPath)) {
+      res.status(404).json({ error: 'File not found' });
+      return;
+    }
+    res.sendFile(fullPath);
+  });
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
